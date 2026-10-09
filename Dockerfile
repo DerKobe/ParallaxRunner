@@ -2,7 +2,7 @@
 FROM node:24-alpine
 
 ENV NODE_ENV=production \
-    PORT=5000 \
+    PORT=3000 \
     DATA_DIR=/app/data
 
 WORKDIR /app
@@ -11,7 +11,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-COPY server.js ./
+COPY server.js CHECKS ./
 COPY public ./public
 COPY tools ./tools
 
@@ -19,5 +19,5 @@ COPY tools ./tools
 RUN mkdir -p /app/data && chown -R node:node /app/data
 USER node
 
-EXPOSE 5000
+EXPOSE 3000
 CMD ["node", "server.js"]

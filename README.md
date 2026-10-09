@@ -32,13 +32,15 @@ Die Bots spielen wirklich: gleiche Strecke, Physik und Stalker wie Menschen. All
 
 ## Deployment auf Dokku
 
-Das Repo enthält alles für einen Push-Deploy: `Dockerfile` (Node 24, nur Produktions-Abhängigkeiten, läuft als `node`-User auf Port 5000), `.dockerignore` und `app.json` (genau **eine** Web-Instanz – der Spielzustand liegt im Speicher – plus Healthcheck auf `/api/status`, bevor Dokku umschaltet). WebSockets laufen über Dokkus nginx ohne Zusatzkonfiguration; bei HTTPS verbindet sich der Client automatisch per `wss://`.
+Das Repo enthält alles für einen Push-Deploy: `Dockerfile` (Node 24, nur Produktions-Abhängigkeiten, läuft als `node`-User auf Port 3000), `.dockerignore`, `CHECKS` (Healthcheck auf `/api/status`, bevor Dokku umschaltet – das Format, das auch ältere Dokku-Versionen wie 0.24 verstehen) und `app.json` (genau **eine** Web-Instanz, weil der Spielzustand im Speicher liegt; Dokku ≥ 0.31 liest dort auch den Healthcheck). WebSockets laufen über Dokkus nginx ohne Zusatzkonfiguration; bei HTTPS verbindet sich der Client automatisch per `wss://`.
 
 Einmalig auf dem Server (App-Name und Domain anpassen):
 
 ```bash
 dokku apps:create parallax-runner
 dokku domains:set parallax-runner runner.example.com
+# Proxy auf den Container-Port 3000 (Dokku < 0.31: proxy:ports-set, neuere Versionen: ports:set)
+dokku proxy:ports-set parallax-runner http:80:3000
 # Hall of Fame + Streckenmarker überleben Deploys nur mit einem Volume
 dokku storage:ensure-directory --chown heroku parallax-runner   # uid 1000 = node-User im Image
 dokku storage:mount parallax-runner /var/lib/dokku/data/storage/parallax-runner:/app/data
