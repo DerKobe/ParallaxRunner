@@ -11,8 +11,11 @@ const P = {
   GRAVITY: 40, FALL_MULT: 1.3, CUT_MULT: 2.4, MAX_FALL: 24,
   JUMP_V: 16.8, DJUMP_V: 14.5,
   WALL_SLIDE_MAX: 3.5, WALLJUMP_VX: 9.5, WALLJUMP_VY: 15.5, WALL_LOCK: 0.13,
+  WALL_REACH: 0.3,    // a wall jump works from this far away (cling/slide still needs contact)
+  WALL_COYOTE: 0.12,  // …and this long after letting go of a wall
+  WALL_ANTICIPATE: 1.3, // jump pressed this close before a tall wall waits for it instead of double jumping
   SLIDE_MIN_SPEED: 2.5, SLIDE_BOOST: 3.5, SLIDE_MAX: 13.5, SLIDE_FRICTION: 9, SLIDE_MIN_TIME: 0.35, CRAWL: 3.2,
-  COYOTE: 0.1, JUMP_BUFFER: 0.13, STEP: 1 / 120,
+  COYOTE: 0.1, JUMP_BUFFER: 0.15, STEP: 1 / 120,
 };
 export const PHYS = P;
 const EPS = 1e-4;
@@ -35,6 +38,8 @@ export class Player {
     this.coyote = 0; this.jumpBuf = 0; this.lock = 0;
     this.wallDir = 0; this.wallSliding = false;
     this.lastWall = null; this.wallBlocked = false;
+    this.wallMem = null;     // last wall within reach { dir, col, t } – wall coyote time
+    this.fullJump = false;   // wall jumps always reach full height (no early-release cut)
     this.spin = 0; this.runPhase = 0;
     this.dead = false; this.deadTimer = 0;
     this.maxX = this.x; this.runTime = 0;
@@ -51,6 +56,28 @@ export class Player {
         if (isSolid(this.level.get(tx, ty))) return true;
     return false;
   }
+  // flying towards an unused wall too tall to double-jump over? then an early jump press means "wall jump"
+  tallWallAhead(used) {
+    const d = Math.sign(this.vx);
+    if (Math.abs(this.vx) < 1.5) return false;
+    const y0 = this.y + 0.15, y1 = this.y + this.h - 0.15;
+    const col = d > 0
+      ? this.wallColumn(this.x + P.W / 2, this.x + P.W / 2 + P.WALL_ANTICIPATE, y0, y1)
+      : this.wallColumn(this.x - P.W / 2 - P.WALL_ANTICIPATE, this.x - P.W / 2, y0, y1, true);
+    if (col === null || used(d, col)) return false;
+    return this.solidBox(col, this.y + 3.2, col + 1, this.y + 3.6);
+  }
+
+  // first solid column in [x0, x1] overlapping rows y0..y1 (nearest to the player first), or null
+  wallColumn(x0, x1, y0, y1, leftSide = false) {
+    const a = Math.floor(x0), b = Math.floor(x1 - EPS);
+    for (let i = 0; i <= b - a; i++) {
+      const tx = leftSide ? b - i : a + i;
+      if (this.solidBox(tx, y0, tx + 1, y1)) return tx;
+    }
+    return null;
+  }
+
   headroom() { return !this.solidBox(this.x - P.W / 2, this.y + 0.01, this.x + P.W / 2, this.y + P.STAND_H); }
 
   update(dt, input) {
@@ -102,33 +129,44 @@ export class Player {
 
     // --- walls
     const l = this.x - P.W / 2, r = this.x + P.W / 2;
-    const touchR = this.solidBox(r, this.y + 0.15, r + 0.06, this.y + this.h - 0.15);
-    const touchL = this.solidBox(l - 0.06, this.y + 0.15, l, this.y + this.h - 0.15);
-    this.wallDir = this.onGround ? 0 : touchR ? 1 : touchL ? -1 : 0;
+    const y0 = this.y + 0.15, y1 = this.y + this.h - 0.15;
+    const touchR = this.solidBox(r, y0, r + 0.06, y1);        // contact: cling / wall slide
+    const touchL = this.solidBox(l - 0.06, y0, l, y1);
+    const nearR = this.wallColumn(r, r + P.WALL_REACH, y0, y1);  // reach: wall jump
+    const nearL = this.wallColumn(l - P.WALL_REACH, l, y0, y1, true);
     // Wall jumps must alternate between walls: the wall you last jumped off stays "used" until you
     // land or kick off a different wall. You only cling to walls you can jump from.
-    const wallCol = this.wallDir > 0 ? Math.floor(r + 0.06) : this.wallDir < 0 ? Math.floor(l - 0.06) : 0;
-    const usedWall = this.wallDir !== 0 && this.lastWall?.dir === this.wallDir && this.lastWall.col === wallCol;
+    const used = (d, c) => this.lastWall?.dir === d && this.lastWall.col === c;
+    let wall = null;
+    if (!this.onGround) {
+      if (nearR !== null && !used(1, nearR)) wall = { dir: 1, col: nearR };
+      else if (nearL !== null && !used(-1, nearL)) wall = { dir: -1, col: nearL };
+    }
+    if (wall) this.wallMem = { ...wall, t: P.WALL_COYOTE };
+    else if (this.wallMem) { this.wallMem.t -= dt; if (this.wallMem.t <= 0 || this.onGround) this.wallMem = null; }
+    const jumpWall = wall ?? this.wallMem;
+    this.wallDir = jumpWall ? jumpWall.dir : 0;
     const pressing = (touchR && dir > 0) || (touchL && dir < 0);
-    this.wallBlocked = !this.onGround && usedWall && pressing;
-    if (usedWall) this.wallDir = 0;
-    this.wallSliding = !this.onGround && this.vy < 0 && this.wallDir !== 0 && pressing;
-    if (this.wallSliding) this.facing = -this.wallDir;
+    const contactUsed = (touchR && used(1, this.wallColumn(r, r + 0.06, y0, y1))) || (touchL && used(-1, this.wallColumn(l - 0.06, l, y0, y1, true)));
+    this.wallBlocked = !this.onGround && pressing && contactUsed;
+    this.wallSliding = !this.onGround && this.vy < 0 && pressing && !contactUsed && !!wall;
+    if (this.wallSliding) this.facing = -wall.dir;
 
     // --- jumps
     if (this.jumpBuf > 0) {
       if ((this.onGround || this.coyote > 0) && (!this.sliding || this.headroom())) {
-        this.vy = P.JUMP_V; this.sliding = false;
+        this.vy = P.JUMP_V; this.sliding = false; this.fullJump = false;
         this.onGround = false; this.coyote = 0; this.jumpBuf = 0; this.jumpHeld = true;
         this.events.push({ type: 'jump' });
-      } else if (!this.onGround && this.wallDir) {
-        this.vy = P.WALLJUMP_VY; this.vx = -this.wallDir * P.WALLJUMP_VX;
-        this.facing = -this.wallDir; this.lock = P.WALL_LOCK;
-        this.doubleAvail = true; this.jumpBuf = 0; this.jumpHeld = true;
-        this.lastWall = { dir: this.wallDir, col: wallCol };
-        this.events.push({ type: 'walljump', dir: this.wallDir });
-      } else if (!this.onGround && this.doubleAvail) {
-        this.vy = P.DJUMP_V; this.doubleAvail = false; this.jumpBuf = 0; this.jumpHeld = true;
+      } else if (!this.onGround && jumpWall) {
+        this.vy = P.WALLJUMP_VY; this.vx = -jumpWall.dir * P.WALLJUMP_VX;
+        this.facing = -jumpWall.dir; this.lock = P.WALL_LOCK;
+        this.doubleAvail = true; this.jumpBuf = 0; this.jumpHeld = true; this.fullJump = true;
+        this.lastWall = { dir: jumpWall.dir, col: jumpWall.col };
+        this.wallMem = null;
+        this.events.push({ type: 'walljump', dir: jumpWall.dir });
+      } else if (!this.onGround && this.doubleAvail && !(this.jumpBuf > dt * 1.5 && this.tallWallAhead(used))) {
+        this.vy = P.DJUMP_V; this.doubleAvail = false; this.jumpBuf = 0; this.jumpHeld = true; this.fullJump = false;
         this.spin = 0.36;
         this.events.push({ type: 'djump' });
       }
@@ -136,8 +174,9 @@ export class Player {
 
     // --- gravity
     let g = P.GRAVITY;
+    if (this.vy <= 0) this.fullJump = false;
     if (this.vy < 0) g *= P.FALL_MULT;
-    else if (!this.jumpHeld) g *= P.CUT_MULT;
+    else if (!this.jumpHeld && !this.fullJump) g *= P.CUT_MULT;
     this.vy -= g * dt;
     if (this.wallSliding) this.vy = Math.max(this.vy, -P.WALL_SLIDE_MAX);
     this.vy = Math.max(this.vy, -P.MAX_FALL);

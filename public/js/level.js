@@ -249,13 +249,17 @@ export class Level {
   }
 
   seg_hover(d) {
-    // police glider patrolling just above head height: run underneath, don't jump
+    // police glider patrolling at chest height inside a tunnel under a low billboard:
+    // standing you run into it, the ceiling is too low to jump over it – slide underneath
     this.flat(2);
     const len = this.r(5, 7);
-    const x0 = this.cols.length + 1;
-    this.flat(len, { noDeco: true });
-    const x1 = this.cols.length - 1;
-    this.addEnemy({ type: ENEMY.HOVER, x0, x1, y0: this.g + 1.8, y1: this.g + 1.8, period: 2 * (x1 - x0) / (3 + 2 * d) });
+    const start = this.cols.length;
+    for (let i = 0; i < len; i++) {
+      const c = this.pushCol(this.g, { noDeco: true });
+      for (let y = this.g + 3; y < Math.min(H, this.g + 10); y++) c[y] = SIGN;
+    }
+    const x0 = start + 1, x1 = start + len - 1;
+    this.addEnemy({ type: ENEMY.HOVER, x0, x1, y0: this.g + 1, y1: this.g + 1, period: 2 * (x1 - x0) / (3 + 2 * d) });
     this.flat(2);
   }
 

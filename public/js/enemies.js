@@ -7,7 +7,7 @@ export const ENEMY = { CRAWLER: 0, SENTRY: 1, HOVER: 2 };
 export const ENEMY_SIZE = {
   [ENEMY.CRAWLER]: { w: 0.9, h: 0.75 },  // spider-bot on the roof: jump over it
   [ENEMY.SENTRY]: { w: 0.85, h: 0.85 },  // floating mine going up and down: pass while it is up
-  [ENEMY.HOVER]: { w: 1.6, h: 0.55 },    // police glider at head height: run underneath
+  [ENEMY.HOVER]: { w: 1.6, h: 0.55 },    // police glider at chest height in a low tunnel: slide underneath
 };
 
 // position of enemy e at time t (seconds) → out { x, y, dir, ph }
