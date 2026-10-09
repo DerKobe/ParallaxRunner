@@ -17,7 +17,17 @@ npm start          # http://localhost:3000
 ```
 
 Optional: `SEED=1234 npm start` für eine feste Strecke, `PORT=8080` für einen anderen Port.
-Zum Ausprobieren ohne Mitspieler: `npm run bots` verbindet drei Demo-Runner.
+### Testen mit Bots
+
+```bash
+npm run demo        # Server + 6 Bots in einem Rutsch
+npm run demo:zap    # dasselbe, Bots schießen auch (auf Nachbarn und deren Stalker)
+npm run bots        # 5 Bots zu einem bereits laufenden Server hinzufügen
+```
+
+Eigene Anzahl: `node server.js --bots 10 --zap` bzw. `node tools/bots.js 8 --zap --url ws://host:port/ws`.
+
+Die Bots spielen wirklich: gleiche Strecke, Physik und Stalker wie Menschen. Alle 0,1 s spielen sie ein paar zufällige Eingabefolgen ~1 s voraus durch und nehmen die beste (`tools/botbrain.js`). Ihr Können ist über die Bots verteilt – vom tollpatschigen Bot, der oft stirbt und zögert, bis zum Profi, der Kamine hochklettert und mit fast Höchsttempo läuft. Rechenlast: ca. 17 % eines CPU-Kerns für Server + 6 Bots.
 
 ## Steuerung
 
@@ -40,4 +50,4 @@ Gamepad wird unterstützt.
 - `public/js/player.js` – Tile-Physik: Coyote-Time, Jump-Buffer, variable Sprunghöhe, Double-Jump, Wall-Slide/-Jump, Slide mit Kriechen unter niedrigen Decken.
 - `public/js/world.js` – three.js-Darstellung: geteilte Chunk-Geometrie, eine `Lane` pro Spieler (Ein-/Wegfall-Animation), Skyline-Parallax, Regen, Spinner, Pixel-Postprocessing (Low-Res, Dithering, Bloom, Scanlines, Glitch).
 - `public/js/textures.js` – sämtliche Pixel-Art wird zur Laufzeit generiert (Tiles, Runner-Spritesheet, Skyline).
-- `tools/bots.js` – Demo-Bots für Tests.
+- `tools/bots.js`, `tools/botbrain.js` – spielende Test-Bots (siehe oben).

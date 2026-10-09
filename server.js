@@ -227,4 +227,10 @@ setInterval(() => {
 
 server.listen(PORT, () => {
   console.log(`Parallax Runner running on http://localhost:${PORT}  (track seed ${SEED})`);
+  // local testing: `node server.js --bots 6 [--zap]` fills the server with playing bots
+  const argv = process.argv.slice(2), bi = argv.indexOf('--bots');
+  if (bi >= 0) {
+    const count = Number(argv[bi + 1]) || 5;
+    import('./tools/bots.js').then(m => m.spawnBots(count, { url: `ws://localhost:${PORT}/ws`, zap: argv.includes('--zap') }));
+  }
 });

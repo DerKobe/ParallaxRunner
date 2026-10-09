@@ -424,6 +424,10 @@ function frame(now) {
       if (!p.dead && h.update(dt)) p.die('caught');
       handleEvents(p.events.splice(0));
       handleHunterEvents(h.events.splice(0));
+    }
+    // (the events above may have ended the run, e.g. the no-show rule)
+    if (S.mode === 'play' && S.localLane) {
+      const p = S.player, h = S.hunter;
       S.localLane.setRunner(p.x, p.y, p.anim, p.facing, dt, p.runPhase);
       S.localLane.setHunter(h.x, h.y, p.dead ? HS.NONE : h.state);
       if (p.sliding && Math.random() < 0.5) S.localLane.sparks();
