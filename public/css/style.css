@@ -55,12 +55,24 @@ canvas#game { position: fixed; inset: 0; width: 100vw; height: 100vh; display: b
 .ticker span { white-space: nowrap; padding-left: 100%; animation: ticker 38s linear infinite; }
 @keyframes ticker { to { transform: translateX(-100%); } }
 
-.idle-warn {
-  position: fixed; left: 50%; top: 22%; transform: translateX(-50%); pointer-events: none;
-  font-family: var(--pixel); font-size: clamp(14px, 2.4vw, 22px); color: var(--yellow);
-  background: rgba(6, 2, 14, 0.8); border: 2px solid var(--yellow); padding: 12px 18px;
-  text-shadow: 0 0 8px var(--yellow); animation: blink 0.8s steps(2) infinite;
+.danger {
+  position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.15s;
+  box-shadow: inset 0 0 160px 40px rgba(255, 20, 50, 0.75);
+  animation: pulse 0.5s ease-in-out infinite alternate;
 }
+@keyframes pulse { from { filter: brightness(0.7); } to { filter: brightness(1.3); } }
+.stalker, .zap { font-family: var(--pixel); font-size: 10px; margin-top: 10px; padding: 6px 8px; display: inline-block; background: rgba(6, 2, 14, 0.7); border-left: 3px solid var(--muted); color: var(--ink); }
+.stalker { display: block; width: max-content; }
+.stalker.bad { color: #ff4d6a; border-color: #ff2030; text-shadow: 0 0 8px #ff2030; animation: blink 0.5s steps(2) infinite; }
+.stalker.good { color: #39ff14; border-color: #39ff14; }
+.zap { color: var(--muted); }
+.zap.ready { color: var(--cyan); border-color: var(--cyan); }
+.feed { position: absolute; left: 50%; top: 16px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.feed-item { font-family: var(--pixel); font-size: 11px; padding: 7px 12px; background: rgba(6, 2, 14, 0.85); border: 2px solid var(--cyan); color: var(--cyan); transition: opacity 0.5s, transform 0.5s; white-space: nowrap; }
+.feed-item.bad { border-color: #ff2030; color: #ff4d6a; }
+.feed-item.good { border-color: #39ff14; color: #39ff14; }
+.feed-item.out { opacity: 0; transform: translateY(-8px); }
+.warnline { color: #ff4d6a; }
 .notice { margin-top: 8px; padding: 10px 12px; font-size: 19px; color: var(--yellow); border: 2px solid var(--yellow); background: rgba(249, 200, 14, 0.08); }
 
 /* ------------------------------------------------ death */

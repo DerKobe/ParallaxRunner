@@ -6,10 +6,13 @@ import { Input } from './input.js';
 import { World, Lane, LANE_GAP } from './world.js';
 import { Net } from './net.js';
 import { Sfx } from './audio.js';
+import { Hunter, HS } from './hunter.js';
 
 const $ = (id) => document.getElementById(id);
-const IDLE_WARN = 45; // s without movement before the HUD warns (server ends the run at 60 s)
-const IDLE_LIMIT = 60;
+const SHOT_COOLDOWN = 1.5;   // s
+const KO_RUNNER = 1;         // s a zapped runner is knocked out
+const KO_HUNTER = 3;         // s until a shot-down stalker is replaced
+const AFK_LIMIT = 3;         // caught this often at the start without moving → run ends
 const INTERP_DELAY = 110; // ms
 const SEND_INTERVAL = 50; // ms
 
@@ -28,8 +31,8 @@ const S = {
   viewIds: [],          // ids the server streams to us (sliding window around us / the watched runner)
   board: new Map(),     // id -> x for every runner (1 Hz), for the live lists
   falling: [],          // lanes currently dropping/sinking out of view
-  idleT: 0, idleX: 0, idleY: 0,
-  level: null, player: null, localLane: null, attract: null,
+  level: null, player: null, hunter: null, localLane: null, attract: null,
+  shotCd: 0, afk: 0, afkKick: false, alarmT: 0,
   sendT: 0, best: 0, deaths: 0, deadUntil: 0,
 };
 
@@ -63,15 +66,36 @@ const net = new Net({
   kicked(m) {
     if (S.mode !== 'play') return;
     toMenu(false);
-    showNotice(m.reason === 'idle' ? `OFF AIR – ${IDLE_LIMIT} s without movement. Your run was ended.` : 'Your run was ended.');
+    showNotice(m.reason === 'stale' ? 'SIGNAL LOST – your game stopped sending (inactive tab?). Run ended.' : 'Your run was ended.');
+  },
+  hit(m) { // a neighbour's zap got us or our stalker
+    if (S.mode !== 'play' || S.player.dead) return;
+    if (m.kind === 'runner') {
+      S.player.knockOut(KO_RUNNER);
+      world.glitch = Math.max(world.glitch, 0.5);
+      feed(`${m.name} ZAPPED YOU!`, 'bad');
+    } else if (m.kind === 'hunter' && S.hunter.knockDown(KO_HUNTER)) {
+      sfx.boom();
+      feed(`${m.name} SHOT DOWN YOUR STALKER · +${KO_HUNTER} s`, 'good');
+    }
+  },
+  shot(m) { // somebody in our window fired: draw the beam between their lane and the target's
+    const from = S.remotes.get(m.from);
+    if (!from) return;
+    const target = m.target === S.myId ? S.localLane : S.remotes.get(m.target)?.lane;
+    world.fireShot({
+      x: m.x, y: m.y + 0.9, z0: from.lane.z, z1: target ? target.z : farLaneZ(), color: from.color,
+      onArrive: () => { if (target) impact(target, m.kind); },
+    });
+    sfx.zap(0.35);
   },
   snap(m) {
     const now = performance.now();
-    for (const [id, x, y, a, f] of m.p) {
+    for (const [id, x, y, a, f, hx, hy, hs] of m.p) {
       if (id === S.myId) continue;
       const r = S.remotes.get(id);
       if (!r) continue;
-      r.samples.push({ t: now, x, y, a, f });
+      r.samples.push({ t: now, x, y, a, f, hx, hy, hs });
       if (r.samples.length > 40) r.samples.splice(0, r.samples.length - 40);
     }
   },
@@ -90,6 +114,7 @@ function setupLevel(seed) {
   S.level = new Level(seed);
   world.setLevel(S.level);
   S.player = new Player(S.level);
+  S.hunter = new Hunter(S.player);
   if (S.mode === 'play') S.localLane = makeLocalLane();
   syncLanes();
 }
@@ -147,8 +172,8 @@ $('start-form').addEventListener('submit', (e) => {
 function startGame() {
   S.mode = 'play';
   S.player.reset();
-  S.best = 0; S.deaths = 0;
-  S.idleT = 0; S.idleX = S.player.x; S.idleY = S.player.y;
+  S.hunter.reset();
+  S.best = 0; S.deaths = 0; S.shotCd = 0; S.afk = 0; S.afkKick = false;
   $('notice').hidden = true;
   S.localLane?.dispose();
   S.localLane = makeLocalLane();
@@ -167,7 +192,7 @@ function toMenu(tellServer = true) {
   if (S.mode !== 'play') return;
   S.mode = 'menu';
   if (tellServer) net.send({ t: 'menu' });
-  $('idle-warn').hidden = true;
+  $('danger').style.opacity = 0;
   if (S.localLane) { S.localLane.fall(); S.falling.push(S.localLane); S.localLane = null; }
   $('menu').hidden = false; $('hud').hidden = true; $('death').hidden = true;
   world.camTarget = { ...CAM_MENU };
@@ -286,7 +311,11 @@ function sampleRemote(r, now) {
       const k = (t - a.t) / Math.max(1, b.t - a.t);
       if (Math.abs(b.x - a.x) > 6 || Math.abs(b.y - a.y) > 6) return k < 0.5 ? a : b; // respawn: no smear
       const near = k < 0.5 ? a : b;
-      return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, a: near.a, f: near.f };
+      const hJump = Math.abs(b.hx - a.hx) > 6 || a.hs !== b.hs;
+      return {
+        x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, a: near.a, f: near.f,
+        hx: hJump ? near.hx : a.hx + (b.hx - a.hx) * k, hy: hJump ? near.hy : a.hy + (b.hy - a.hy) * k, hs: near.hs,
+      };
     }
   }
   return s[s.length - 1];
@@ -332,6 +361,48 @@ function directMenuCamera(dt) {
   return true;
 }
 
+// ------------------------------------------------------------------ zap shots
+// A shot flies straight into the depth through the lanes behind you (same x/y as you) and hits
+// the first runner or stalker in its way. The shooter's view decides; the server checks plausibility.
+function farLaneZ() { return -(S.remotes.size + 1.5) * LANE_GAP; }
+
+function shoot() {
+  const p = S.player;
+  if (S.shotCd > 0 || p.dead || p.koT > 0) return;
+  S.shotCd = SHOT_COOLDOWN;
+  const lanes = [...S.remotes.values()].filter(r => r.lane.state !== 'fall' && r.lane.state !== 'sink')
+    .sort((a, b) => a.lane.index - b.lane.index);
+  let hit = null;
+  for (const r of lanes) {
+    const l = r.lane;
+    if (l.anim !== ANIM.DEAD && Math.abs(l.rx - p.x) < 0.75 && Math.abs(l.ry - p.y) < 1.1) { hit = { r, kind: 'runner' }; break; }
+    if (l.hs === HS.CHASE && !l.wreck && Math.abs(l.hx - p.x) < 0.95 && Math.abs(l.hy - p.y) < 1.4) { hit = { r, kind: 'hunter' }; break; }
+  }
+  world.fireShot({
+    x: p.x + p.facing * 0.3, y: p.y + 0.9, z0: 0.6, z1: hit ? hit.r.lane.z : farLaneZ(), color: S.color,
+    onArrive: () => { if (hit) impact(hit.r.lane, hit.kind); },
+  });
+  S.localLane.particles.emit(p.x + p.facing * 0.3, p.y + 0.9, 6, [S.color, '#ffffff'], 3, 2, 0.25);
+  net.send({ t: 'shoot', x: +p.x.toFixed(2), y: +p.y.toFixed(2), target: hit?.r.id ?? null, kind: hit?.kind ?? null });
+  sfx.zap(1);
+  if (hit) feed(hit.kind === 'runner' ? `YOU ZAPPED ${hit.r.name}` : `YOU SHOT DOWN ${hit.r.name}'S STALKER`, 'info');
+}
+
+function impact(lane, kind) {
+  if (kind === 'runner') lane.particles.emit(lane.rx, lane.ry + 0.9, 18, ['#ffffff', '#05d9e8', '#f9c80e'], 7, 6, 0.5);
+  else if (kind === 'hunter') lane.particles.emit(lane.hx, lane.hy + 1.1, 12, ['#ffffff', '#ff2030'], 6, 5, 0.4);
+}
+
+function feed(text, kind = 'info') {
+  const el = document.createElement('div');
+  el.className = `feed-item ${kind}`;
+  el.textContent = text;
+  $('feed').prepend(el);
+  setTimeout(() => el.classList.add('out'), 2600);
+  setTimeout(() => el.remove(), 3200);
+  while ($('feed').children.length > 4) $('feed').lastChild.remove();
+}
+
 // ------------------------------------------------------------------ main loop
 let last = performance.now();
 function frame(now) {
@@ -346,25 +417,29 @@ function frame(now) {
   if (S.level) {
     // local runner
     if (S.mode === 'play' && S.localLane) {
-      const p = S.player;
+      const p = S.player, h = S.hunter;
+      S.shotCd = Math.max(0, S.shotCd - dt);
+      if (input.pressed('shoot')) shoot();
       p.update(dt, input);
+      if (!p.dead && h.update(dt)) p.die('caught');
       handleEvents(p.events.splice(0));
+      handleHunterEvents(h.events.splice(0));
       S.localLane.setRunner(p.x, p.y, p.anim, p.facing, dt, p.runPhase);
+      S.localLane.setHunter(h.x, h.y, p.dead ? HS.NONE : h.state);
       if (p.sliding && Math.random() < 0.5) S.localLane.sparks();
       if (p.wallSliding && Math.random() < 0.25) S.localLane.particles.emit(p.x - p.facing * 0.3, p.y + 1.2, 1, '#cfcbe8', 1, 0, 0.3);
       // used wall: no grip – red scrape sparks show you need the other wall
       if (p.wallBlocked && Math.random() < 0.5) S.localLane.particles.emit(p.x + p.facing * 0.32, p.y + 0.9, 2, ['#ff2a6d', '#ff6040'], 2, 1.5, 0.25);
       S.best = Math.max(S.best, p.distance);
       S.sendT -= dt * 1000;
-      if (S.sendT <= 0) { S.sendT = SEND_INTERVAL; net.send({ t: 's', x: +p.x.toFixed(2), y: +p.y.toFixed(2), a: p.anim, f: p.facing }); }
+      if (S.sendT <= 0) {
+        S.sendT = SEND_INTERVAL;
+        const hs = p.dead ? HS.NONE : h.state;
+        net.send({ t: 's', x: +p.x.toFixed(2), y: +p.y.toFixed(2), a: p.anim, f: p.facing, h: [+h.x.toFixed(2), +h.y.toFixed(2), hs] });
+      }
       followView(dt, p.x, p.y, p.vx);
       updateHud();
-      // idle warning (the server ends the run after IDLE_LIMIT seconds without movement)
-      if (Math.abs(p.x - S.idleX) > 0.05 || Math.abs(p.y - S.idleY) > 0.05) { S.idleT = 0; S.idleX = p.x; S.idleY = p.y; }
-      else S.idleT += dt;
-      const warn = S.idleT > IDLE_WARN;
-      $('idle-warn').hidden = !warn;
-      if (warn) $('idle-warn').textContent = `MOVE! OFF AIR IN ${Math.max(0, Math.ceil(IDLE_LIMIT - S.idleT))} s`;
+      updateStalkerHud(dt);
     }
 
     // remote runners
@@ -373,6 +448,7 @@ function frame(now) {
       if (smp) r.x = smp.x;
       if (!r.lane || !smp) continue;
       r.lane.setRunner(smp.x, smp.y, smp.a, smp.f, dt);
+      if (smp.hs !== undefined) r.lane.setHunter(smp.hx, smp.hy, smp.hs);
       tagList.push({ lane: r.lane, label: r.name, color: r.color, dead: r.lane.anim === ANIM.DEAD });
     }
 
@@ -412,19 +488,63 @@ function handleEvents(events) {
       case 'land': if (e.speed > 9) { sfx.land(e.speed); lane.dust(Math.min(12, e.speed / 2)); } break;
       case 'slide': sfx.slide(); break;
       case 'bonk': sfx.bonk(); break;
-      case 'die':
+      case 'ko': sfx.zapped(); break;
+      case 'die': {
         sfx.die(); lane.burst(); world.glitch = 1.2;
         S.deaths++;
         net.send({ t: 'die', d: e.distance });
-        $('death-sub').textContent = `${e.distance} m · BACK TO START…`;
+        const caught = e.cause === 'caught';
+        if (caught) world.glitch = 1.6;
+        // caught again and again without leaving the start → nobody is playing: end the run
+        S.afk = caught && e.distance < 5 ? S.afk + 1 : 0;
+        S.afkKick = S.afk >= AFK_LIMIT;
+        const title = caught ? 'CAUGHT' : 'TERMINATED';
+        $('death-title').textContent = title; $('death-title').dataset.text = title;
+        $('death-sub').textContent = S.afkKick ? 'NO-SHOW · OFF AIR' : `${e.distance} m · BACK TO START…`;
         $('death').hidden = false;
         break;
+      }
       case 'respawn':
+        S.hunter.reset();
+        if (S.afkKick) {
+          toMenu();
+          showNotice(`OFF AIR – caught ${AFK_LIMIT}× at the start without moving. Your run was ended.`);
+          return;
+        }
         sfx.respawn(); world.glitch = 0.6; $('death').hidden = true;
         view.snap = true;
         break;
     }
   }
+}
+
+function handleHunterEvents(events) {
+  for (const e of events) {
+    if (e.type === 'return') { sfx.alarm(); feed('A NEW STALKER IS ON YOUR TRAIL', 'bad'); }
+  }
+}
+
+function updateStalkerHud(dt) {
+  const h = S.hunter, p = S.player;
+  const el = $('stalker');
+  let danger = 0;
+  if (p.dead) { el.textContent = 'STALKER –'; el.className = 'stalker'; }
+  else if (h.state === HS.DOWN) {
+    el.textContent = `STALKER DOWN · ${h.downT.toFixed(1)} s`; el.className = 'stalker good';
+  } else if (h.ht < 0) {
+    el.textContent = `STALKER INBOUND · ${(-h.ht).toFixed(1)} s`; el.className = 'stalker';
+  } else {
+    const gap = Math.max(0, Math.hypot(p.x - h.x, p.y - h.y));
+    el.textContent = `STALKER ${gap.toFixed(1)} m${h.bonus ? ` · +${h.bonus} s HEAD START` : ''}`;
+    danger = THREE.MathUtils.clamp(1 - (gap - 1) / 4, 0, 1);
+    el.className = `stalker${danger > 0.4 ? ' bad' : ''}`;
+  }
+  $('danger').style.opacity = danger * 0.85;
+  S.alarmT -= dt;
+  if (danger > 0.4 && S.alarmT <= 0) { sfx.beep(); S.alarmT = 0.55 - danger * 0.35; }
+  const zap = $('zap');
+  zap.textContent = S.shotCd > 0 ? `ZAP ${S.shotCd.toFixed(1)} s` : 'ZAP READY [F]';
+  zap.className = `zap${S.shotCd > 0 ? '' : ' ready'}`;
 }
 
 function updateHud() {

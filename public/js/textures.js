@@ -141,8 +141,8 @@ export function slotUV(s) {
 }
 
 // ------------------------------------------------------------------ runner sprite sheet
-export const FRAME = { IDLE: 0, RUN: 2, RUN_N: 6, JUMP: 8, FALL: 9, DJUMP: 10, DJUMP_N: 4, WALL: 14, SLIDE: 15, DEAD: 17 };
-export const SHEET_FRAMES = 18;
+export const FRAME = { IDLE: 0, RUN: 2, RUN_N: 6, JUMP: 8, FALL: 9, DJUMP: 10, DJUMP_N: 4, WALL: 14, SLIDE: 15, DEAD: 17, KO: 18 };
+export const SHEET_FRAMES = 19;
 export const CELL = 32;
 
 function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
@@ -277,6 +277,7 @@ const POSES = {
   tuck: { lean: 0.45, hipY: 10, coat: 1.0, legs: [[1.5, -0.2], [1.8, 0.1]], arms: [[0.7, 1.6], [0.9, 1.9]] },
   wall: { lean: -0.12, hipY: 12, coat: -0.35, hipX: 1, legs: [[-0.7, -0.15], [0.55, 0.05]], arms: [[-2.5, -2.8], [0.9, 0.6]] },
   slide0: { lean: -1.15, hipY: 4, hipX: -3, coat: 1.25, legs: [[1.0, -0.4], [1.45, 1.55]], arms: [[-1.2, -1.5], [1.7, 2.2]] },
+  ko: { lean: 0.55, hipY: 9, hipX: -1, coat: 0.15, legs: [[0.55, -0.35], [0.85, -0.15]], arms: [[0.25, 0.1], [0.45, 0.3]] },
   slide1: { lean: -1.1, hipY: 4, hipX: -3, coat: 1.4, legs: [[1.05, -0.35], [1.45, 1.55]], arms: [[-1.25, -1.5], [1.6, 2.1]] },
 };
 
@@ -300,6 +301,7 @@ export function makeRunnerSheet(color) {
   draw(FRAME.WALL, POSES.wall);
   draw(FRAME.SLIDE, POSES.slide0); draw(FRAME.SLIDE + 1, POSES.slide1);
   draw(FRAME.DEAD, POSES.fall);
+  draw(FRAME.KO, POSES.ko);
   return pixelTexture(c);
 }
 
@@ -412,6 +414,30 @@ export function makeSpinnerTexture() {
   p(3, 3, 18, 4, '#2b2f45'); p(6, 1, 10, 2, '#3c4260'); p(8, 1, 6, 2, '#79c8ff');
   p(1, 5, 22, 2, '#1b1e2e'); p(0, 5, 2, 1, '#fff4c0'); p(22, 5, 2, 1, '#ff2020');
   p(10, 0, 2, 1, '#ff2020'); p(12, 0, 2, 1, '#2060ff'); p(4, 7, 4, 2, '#ffb347'); p(16, 7, 4, 2, '#ffb347');
+  return pixelTexture(c);
+}
+
+export function makeHunterTexture() {
+  // STALKER hunter-killer drone, 32x20, facing right
+  const [c, ctx] = canvas(32, 20);
+  const p = (x, y, w, h, col) => { ctx.fillStyle = col; ctx.fillRect(x, y, w, h); };
+  // rotor arms + rotors
+  p(1, 2, 9, 1, '#5d6280'); p(22, 2, 9, 1, '#5d6280'); p(0, 1, 11, 1, '#9aa0bf'); p(21, 1, 11, 1, '#9aa0bf');
+  p(8, 3, 2, 3, '#3a3d52'); p(22, 3, 2, 3, '#3a3d52');
+  // armoured hull
+  p(7, 5, 18, 9, '#1c1e2b'); p(9, 4, 14, 1, '#2d3044'); p(8, 14, 16, 2, '#14151f');
+  p(7, 5, 18, 1, '#3c4060'); p(24, 6, 2, 7, '#2d3044');
+  // warning stripes
+  for (let x = 9; x < 23; x += 4) { p(x, 12, 2, 1, '#f9c80e'); }
+  // mono-eye
+  p(17, 7, 7, 5, '#0a0a10'); p(19, 8, 4, 3, '#ff2030'); p(21, 8, 1, 1, '#ffd0d0');
+  // thrusters
+  p(5, 9, 3, 4, '#3a3d52'); p(3, 10, 2, 2, '#ff8c00'); p(2, 10, 1, 2, '#f9c80e');
+  // gun barrel + antenna
+  p(24, 13, 6, 1, '#5d6280'); p(29, 12, 2, 3, '#3a3d52');
+  p(10, 2, 1, 2, '#5d6280'); p(10, 1, 1, 1, '#ff2030');
+  // underside lights
+  p(11, 16, 2, 1, '#05d9e8'); p(19, 16, 2, 1, '#05d9e8');
   return pixelTexture(c);
 }
 

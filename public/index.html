@@ -21,19 +21,22 @@
       <div class="big" id="hud-dist">0 m</div>
       <div class="sub" id="hud-sub">BEST 0 m · RESETS 0</div>
       <div class="sub viewers" id="hud-viewers">VIEWERS 0</div>
+      <div id="stalker" class="stalker">STALKER –</div>
+      <div id="zap" class="zap ready">ZAP READY [F]</div>
     </div>
+    <div id="feed" class="feed"></div>
     <div class="hud-tr">
       <div class="panel-title">RUNNERS ON AIR</div>
       <ol id="hud-live"></ol>
     </div>
-    <div class="hud-bottom">←→ RUN · SPACE JUMP / DOUBLE / WALL · ↓ SLIDE · ESC MENU · M SOUND</div>
+    <div class="hud-bottom">←→ RUN · SPACE JUMP / DOUBLE / WALL · ↓ SLIDE · F ZAP · ESC MENU · M SOUND</div>
     <div class="ticker"><span id="ticker-text"></span></div>
   </div>
 
-  <div id="idle-warn" class="idle-warn" hidden></div>
+  <div id="danger" class="danger"></div>
 
   <div id="death" hidden>
-    <div class="glitch" data-text="TERMINATED">TERMINATED</div>
+    <div class="glitch" id="death-title" data-text="TERMINATED">TERMINATED</div>
     <div id="death-sub"></div>
   </div>
 
@@ -63,6 +66,8 @@
         <div><kbd>SPACE</kbd> / <kbd>↑</kbd> jump · again in air = double jump</div>
         <div>jump against a wall = wall jump</div>
         <div><kbd>↓</kbd> / <kbd>SHIFT</kbd> while running = slide</div>
+        <div><kbd>F</kbd> / <kbd>X</kbd> zap straight into the lanes behind you: a hit runner is knocked out for 1 s (over a pit they fall), a hit stalker crashes and is replaced after 3 s</div>
+        <div class="warnline">A STALKER flies your route a few seconds behind you. Stop too long and it gets you.</div>
         <div><kbd>ESC</kbd> menu · <kbd>M</kbd> sound · gamepad supported</div>
       </div>
     </div>

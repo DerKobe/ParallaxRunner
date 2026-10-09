@@ -4,18 +4,20 @@ const KEYMAP = {
   ArrowRight: 'right', KeyD: 'right',
   ArrowUp: 'jump', KeyW: 'jump', Space: 'jump', KeyK: 'jump',
   ArrowDown: 'down', KeyS: 'down', ShiftLeft: 'down', ShiftRight: 'down', KeyJ: 'down',
+  KeyF: 'shoot', KeyX: 'shoot', KeyL: 'shoot',
 };
 
 export class Input {
   constructor() {
     this.keys = new Set();
-    this.state = { left: false, right: false, jump: false, down: false };
+    this.latched = new Set(); // keys pressed since the last frame – catches taps shorter than a frame
+    this.state = { left: false, right: false, jump: false, down: false, shoot: false };
     this.prev = { ...this.state };
     this.enabled = true;
     addEventListener('keydown', (e) => {
       if (e.target instanceof HTMLInputElement) return;
       const a = KEYMAP[e.code];
-      if (a && this.enabled) { this.keys.add(a); e.preventDefault(); }
+      if (a && this.enabled) { this.keys.add(a); this.latched.add(a); e.preventDefault(); }
     });
     addEventListener('keyup', (e) => { const a = KEYMAP[e.code]; if (a) this.keys.delete(a); });
     addEventListener('blur', () => this.keys.clear());
@@ -23,8 +25,10 @@ export class Input {
 
   update() {
     this.prev = { ...this.state };
-    const s = { left: false, right: false, jump: false, down: false };
+    const s = { left: false, right: false, jump: false, down: false, shoot: false };
     for (const k of this.keys) s[k] = true;
+    for (const k of this.latched) s[k] = true;
+    this.latched.clear();
     for (const pad of navigator.getGamepads?.() ?? []) {
       if (!pad) continue;
       const ax = pad.axes[0] ?? 0, ay = pad.axes[1] ?? 0;
@@ -33,6 +37,7 @@ export class Input {
       if (ax > 0.35 || b(15)) s.right = true;
       if (b(0) || b(1) || b(12)) s.jump = true;
       if (ay > 0.5 || b(13) || b(2) || b(6) || b(7)) s.down = true;
+      if (b(3) || b(5) || b(4)) s.shoot = true;
     }
     if (!this.enabled) for (const k in s) s[k] = false;
     this.state = s;
