@@ -30,6 +30,8 @@
     <div class="ticker"><span id="ticker-text"></span></div>
   </div>
 
+  <div id="idle-warn" class="idle-warn" hidden></div>
+
   <div id="death" hidden>
     <div class="glitch" data-text="TERMINATED">TERMINATED</div>
     <div id="death-sub"></div>
@@ -45,6 +47,7 @@
         <button id="start-btn" type="submit" disabled>ENTER THE GAME</button>
       </form>
       <div id="conn" class="conn">CONNECTING TO NETWORK…</div>
+      <div id="notice" class="notice" hidden></div>
       <div class="cols">
         <section>
           <h2><span class="dot"></span>LIVE RUNS <span id="live-count" class="muted"></span></h2>

@@ -282,7 +282,11 @@ export class Lane {
   sparks() { this.particles.emit(this.rx - this.facing * 0.3, this.ry + 0.05, 4, ['#f9c80e', '#ffffff'], 3, 3, 0.3); }
   wallDust(dir) { this.particles.emit(this.rx + dir * 0.35, this.ry + 0.9, 6, ['#cfcbe8', '#05d9e8'], 3, 3, 0.35); }
 
+  // player left the game: the lane drops away dramatically
   fall() { if (this.state !== 'fall') { this.state = 'fall'; this.fallT = 0; this.fallV = 0; } }
+  // player still online but no longer in our view window: the lane quietly sinks (reverse of rising in)
+  sink() { if (this.state !== 'fall' && this.state !== 'sink') { this.state = 'sink'; this.fallT = 0; } }
+  get gone() { return (this.state === 'fall' && this.fallT > 3) || (this.state === 'sink' && this.yOff < -28); }
 
   frameFor(t) {
     switch (this.anim) {
@@ -306,6 +310,9 @@ export class Lane {
       this.yOff -= this.fallV * dt;
       this.root.rotation.x = Math.min(0.35, this.fallT * 0.3);
       this.root.rotation.z = -Math.min(0.15, this.fallT * 0.12);
+    } else if (this.state === 'sink') {
+      this.fallT += dt;
+      this.yOff += (-30 - this.yOff) * (1 - Math.exp(-dt * 2.5));
     } else {
       const k = 1 - Math.exp(-dt * 4);
       this.z += (targetZ - this.z) * k;

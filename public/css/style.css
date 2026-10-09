@@ -55,6 +55,14 @@ canvas#game { position: fixed; inset: 0; width: 100vw; height: 100vh; display: b
 .ticker span { white-space: nowrap; padding-left: 100%; animation: ticker 38s linear infinite; }
 @keyframes ticker { to { transform: translateX(-100%); } }
 
+.idle-warn {
+  position: fixed; left: 50%; top: 22%; transform: translateX(-50%); pointer-events: none;
+  font-family: var(--pixel); font-size: clamp(14px, 2.4vw, 22px); color: var(--yellow);
+  background: rgba(6, 2, 14, 0.8); border: 2px solid var(--yellow); padding: 12px 18px;
+  text-shadow: 0 0 8px var(--yellow); animation: blink 0.8s steps(2) infinite;
+}
+.notice { margin-top: 8px; padding: 10px 12px; font-size: 19px; color: var(--yellow); border: 2px solid var(--yellow); background: rgba(249, 200, 14, 0.08); }
+
 /* ------------------------------------------------ death */
 #death { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
 .glitch { position: relative; font-family: var(--pixel); font-size: clamp(28px, 6vw, 64px); color: #fff; text-shadow: 4px 0 var(--pink), -4px 0 var(--cyan); animation: shake 0.12s steps(2) infinite; }

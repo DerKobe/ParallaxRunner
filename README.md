@@ -3,6 +3,10 @@
 Multiplayer-Jump'n'Run im Retro-Cyberpunk-Look: 2D-Gameplay, plastisch in 3D gerendert (three.js) mit Pixel-Art-Postprocessing.
 Alle anderen Spieler laufen live in eigenen Bahnen **hinter** dir. Die Bahnen liegen direkt aneinander und bilden eine zusammenhängende Ebene (gleiche Strecke, gleiche Höhe, gemeinsame Kamera) – jeder Runner ist an seiner echten Position zu sehen. Wer außerhalb des Bildes ist, wird am Rand mit Abstand angezeigt; im Menü schneidet eine Regie-Kamera zwischen den Live-Runs.
 
+**Sichtfenster:** Jeder Spieler bekommt vom Server die 4 Spieler vor und die 4 nach ihm (in Beitrittsreihenfolge) – am Anfang/Ende der Liste entsprechend mehr von der anderen Seite. So hat jeder einen „virtuellen Raum“ mit fließenden Grenzen, und der Traffic wächst nur linear mit der Spielerzahl. Verlässt ein Spieler das Spiel (Disconnect, Menü, Timeout), fällt seine Bahn weg; rutscht er nur aus deinem Fenster, sinkt sie ruhig ab.
+
+**Timeout:** Wer sich 60 Sekunden nicht bewegt, wird vom Server aus dem Lauf genommen und landet im Menü (ab 45 s erscheint eine Warnung). `IDLE_TIMEOUT_MS` überschreibt den Wert, z. B. zum Testen.
+
 ## Start
 
 ```bash

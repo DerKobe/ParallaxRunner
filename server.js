@@ -17,6 +17,10 @@ const HOF_FILE = path.join(DATA_DIR, 'halloffame.json');
 const SEED = Number(process.env.SEED) || ((Math.random() * 2 ** 31) | 0);
 const TICK_HZ = 20;
 const MAX_SPEED = 16; // tiles/s, generous upper bound used for plausibility checks
+const VIEW_SIDE = 4;  // each runner receives the 4 runners before and after them (by join order)
+const VIEW_SIZE = VIEW_SIDE * 2 + 1;
+const IDLE_TIMEOUT = Number(process.env.IDLE_TIMEOUT_MS) || 60_000; // ms without movement → run ends, back to menu
+const MOVE_EPS = 0.05;
 
 const COLORS = ['#ff2a6d', '#05d9e8', '#f9c80e', '#7b61ff', '#39ff14', '#ff8c00', '#ff00ff', '#00ffc6', '#ff4040', '#4da6ff'];
 
@@ -101,6 +105,7 @@ wss.on('connection', (ws) => {
   const c = {
     id: nextId++, ws, mode: 'spectate', name: '', color: COLORS[colorCursor++ % COLORS.length], order: 0,
     x: 0, y: 0, anim: 0, facing: 1, best: 0, deaths: 0, runStart: Date.now(), msgBudget: 60,
+    lastMoveAt: Date.now(), watch: null, viewKey: '',
   };
   clients.set(c.id, c);
   send(ws, { t: 'welcome', id: c.id, seed: SEED, color: c.color, tick: TICK_HZ });
@@ -114,7 +119,7 @@ wss.on('connection', (ws) => {
         c.name = cleanName(m.name);
         c.mode = 'play';
         c.order = ++joinCounter;
-        c.x = 0; c.y = 0; c.best = 0; c.deaths = 0; c.runStart = Date.now();
+        c.x = 0; c.y = 0; c.best = 0; c.deaths = 0; c.runStart = Date.now(); c.lastMoveAt = Date.now();
         broadcastRoster();
         break;
       case 'menu':
@@ -122,10 +127,16 @@ wss.on('connection', (ws) => {
         c.mode = 'spectate';
         broadcastRoster();
         break;
-      case 's': // state update
+      case 's': { // state update
         if (c.mode !== 'play') break;
-        c.x = num(m.x, -2, 1e6); c.y = num(m.y, -50, 100);
+        const x = num(m.x, -2, 1e6), y = num(m.y, -50, 100);
+        if (Math.abs(x - c.x) > MOVE_EPS || Math.abs(y - c.y) > MOVE_EPS) c.lastMoveAt = Date.now();
+        c.x = x; c.y = y;
         c.anim = num(m.a | 0, 0, 15); c.facing = m.f < 0 ? -1 : 1;
+        break;
+      }
+      case 'watch': // menu spectators choose whose neighbourhood they watch
+        c.watch = Number.isInteger(m.id) ? m.id : null;
         break;
       case 'die': {
         if (c.mode !== 'play') break;
@@ -153,16 +164,42 @@ wss.on('connection', (ws) => {
 
 setInterval(() => { for (const c of clients.values()) c.msgBudget = 60; }, 1000);
 
-// Snapshot broadcast: every client (players and menu spectators) sees every live run.
+// Snapshots with a sliding window: in join order, every runner gets the VIEW_SIDE runners before
+// and after them (more from one side at the ends of the list). Spectators get the window around
+// the runner their menu camera is watching. Bandwidth grows linearly with the player count.
+function playersInOrder() { return [...clients.values()].filter(c => c.mode === 'play').sort((a, b) => a.order - b.order); }
+
 setInterval(() => {
-  const p = [];
-  for (const c of clients.values()) {
-    if (c.mode !== 'play') continue;
-    p.push([c.id, Math.round(c.x * 100) / 100, Math.round(c.y * 100) / 100, c.anim, c.facing]);
-  }
   if (!clients.size) return;
-  broadcast({ t: 'snap', ts: Date.now(), p });
+  const players = playersInOrder();
+  const index = new Map(players.map((c, i) => [c.id, i]));
+  const entries = players.map(c => [c.id, Math.round(c.x * 100) / 100, Math.round(c.y * 100) / 100, c.anim, c.facing]);
+  const ts = Date.now();
+  for (const c of clients.values()) {
+    const center = c.mode === 'play' ? index.get(c.id) : (index.get(c.watch) ?? 0);
+    const start = Math.max(0, Math.min(center - VIEW_SIDE, players.length - VIEW_SIZE));
+    const win = entries.slice(start, start + VIEW_SIZE);
+    const key = win.map(e => e[0]).join(',');
+    if (key !== c.viewKey) { c.viewKey = key; send(c.ws, { t: 'view', ids: win.map(e => e[0]) }); }
+    send(c.ws, { t: 'snap', ts, p: win });
+  }
 }, 1000 / TICK_HZ);
+
+// Once per second: distances of everybody (for the live lists) + idle timeout.
+setInterval(() => {
+  const now = Date.now();
+  let changed = false;
+  for (const c of clients.values()) {
+    if (c.mode === 'play' && now - c.lastMoveAt > IDLE_TIMEOUT) {
+      c.mode = 'spectate';
+      send(c.ws, { t: 'kicked', reason: 'idle' });
+      changed = true;
+    }
+  }
+  if (changed) broadcastRoster();
+  const players = playersInOrder();
+  if (players.length) broadcast({ t: 'board', p: players.map(c => [c.id, Math.round(c.x)]) });
+}, 1000);
 
 server.listen(PORT, () => {
   console.log(`Parallax Runner running on http://localhost:${PORT}  (track seed ${SEED})`);

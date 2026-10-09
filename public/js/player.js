@@ -32,6 +32,7 @@ export class Player {
     this.doubleAvail = true; this.jumpHeld = false;
     this.coyote = 0; this.jumpBuf = 0; this.lock = 0;
     this.wallDir = 0; this.wallSliding = false;
+    this.lastWall = null; this.wallBlocked = false;
     this.spin = 0; this.runPhase = 0;
     this.dead = false; this.deadTimer = 0;
     this.maxX = this.x; this.runTime = 0;
@@ -100,7 +101,14 @@ export class Player {
     const touchR = this.solidBox(r, this.y + 0.15, r + 0.06, this.y + this.h - 0.15);
     const touchL = this.solidBox(l - 0.06, this.y + 0.15, l, this.y + this.h - 0.15);
     this.wallDir = this.onGround ? 0 : touchR ? 1 : touchL ? -1 : 0;
-    this.wallSliding = !this.onGround && this.vy < 0 && ((touchR && dir > 0) || (touchL && dir < 0));
+    // Wall jumps must alternate between walls: the wall you last jumped off stays "used" until you
+    // land or kick off a different wall. You only cling to walls you can jump from.
+    const wallCol = this.wallDir > 0 ? Math.floor(r + 0.06) : this.wallDir < 0 ? Math.floor(l - 0.06) : 0;
+    const usedWall = this.wallDir !== 0 && this.lastWall?.dir === this.wallDir && this.lastWall.col === wallCol;
+    const pressing = (touchR && dir > 0) || (touchL && dir < 0);
+    this.wallBlocked = !this.onGround && usedWall && pressing;
+    if (usedWall) this.wallDir = 0;
+    this.wallSliding = !this.onGround && this.vy < 0 && this.wallDir !== 0 && pressing;
     if (this.wallSliding) this.facing = -this.wallDir;
 
     // --- jumps
@@ -113,6 +121,7 @@ export class Player {
         this.vy = P.WALLJUMP_VY; this.vx = -this.wallDir * P.WALLJUMP_VX;
         this.facing = -this.wallDir; this.lock = P.WALL_LOCK;
         this.doubleAvail = true; this.jumpBuf = 0; this.jumpHeld = true;
+        this.lastWall = { dir: this.wallDir, col: wallCol };
         this.events.push({ type: 'walljump', dir: this.wallDir });
       } else if (!this.onGround && this.doubleAvail) {
         this.vy = P.DJUMP_V; this.doubleAvail = false; this.jumpBuf = 0; this.jumpHeld = true;
@@ -135,6 +144,7 @@ export class Player {
     this.moveY(this.vy * dt);
     if (this.onGround) {
       this.doubleAvail = true;
+      this.lastWall = null;
       if (!wasGround) this.events.push({ type: 'land', speed: -fallSpeed });
     }
 

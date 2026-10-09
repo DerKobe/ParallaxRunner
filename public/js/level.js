@@ -179,9 +179,10 @@ export class Level {
   }
 
   seg_chimney() {
-    // tower too high for a double jump; a floating pillar on the left enables wall-jumping up
+    // Tower too high for jump + one wall jump + double jump (max ≈ 9.1 tiles): it can only be climbed
+    // by wall-jumping back and forth between the tower and the floating pillar on the left.
     const base = this.g;
-    const height = this.r(8, 10);
+    const height = this.r(10, 12);
     this.flat(3);
     const pillarX = this.cols.length;
     const pc = this.pushCol(base, { noDeco: true });

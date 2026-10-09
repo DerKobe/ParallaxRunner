@@ -8,7 +8,8 @@ import { Net } from './net.js';
 import { Sfx } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
-const MAX_REMOTE_LANES = 8;
+const IDLE_WARN = 45; // s without movement before the HUD warns (server ends the run at 60 s)
+const IDLE_LIMIT = 60;
 const INTERP_DELAY = 110; // ms
 const SEND_INTERVAL = 50; // ms
 
@@ -23,8 +24,11 @@ const S = {
   mode: 'menu',
   myId: null, color: '#05d9e8', seed: null,
   roster: [], hof: [],
-  remotes: new Map(),   // id -> { id, name, color, samples: [], lane, x }
-  falling: [],          // lanes currently dropping out of view
+  remotes: new Map(),   // id -> { id, name, color, samples: [], lane, x } – only runners in our view window
+  viewIds: [],          // ids the server streams to us (sliding window around us / the watched runner)
+  board: new Map(),     // id -> x for every runner (1 Hz), for the live lists
+  falling: [],          // lanes currently dropping/sinking out of view
+  idleT: 0, idleX: 0, idleY: 0,
   level: null, player: null, localLane: null, attract: null,
   sendT: 0, best: 0, deaths: 0, deadUntil: 0,
 };
@@ -42,11 +46,24 @@ const net = new Net({
     if (m.seed !== S.seed) setupLevel(m.seed);
     $('start-btn').disabled = false;
     if (S.mode === 'play') net.send({ t: 'start', name }); // resume after reconnect
+    director.id = null; // re-announce what the menu camera watches
   },
   roster(m) {
     S.roster = m.players; S.hof = m.hof || [];
     syncLanes();
     renderLists();
+  },
+  view(m) {
+    S.viewIds = m.ids;
+    syncLanes();
+  },
+  board(m) {
+    S.board = new Map(m.p);
+  },
+  kicked(m) {
+    if (S.mode !== 'play') return;
+    toMenu(false);
+    showNotice(m.reason === 'idle' ? `OFF AIR – ${IDLE_LIMIT} s without movement. Your run was ended.` : 'Your run was ended.');
   },
   snap(m) {
     const now = performance.now();
@@ -83,31 +100,38 @@ function makeLocalLane() {
   return l;
 }
 
-// keep one lane per remote player, ordered by join time; departed players' lanes drop away
+// One lane per runner in our view window, ordered by join time.
+// Runner left the game (disconnect / menu / timeout) → lane falls; still online but outside the window → lane sinks.
 function syncLanes() {
   if (!S.level) return;
-  const others = S.roster.filter(p => p.id !== S.myId);
-  const ids = new Set(others.map(p => p.id));
+  const online = new Set(S.roster.map(p => p.id));
+  const inView = new Set(S.viewIds);
+  const visible = S.roster.filter(p => p.id !== S.myId && inView.has(p.id));
+  const visibleIds = new Set(visible.map(p => p.id));
   for (const [id, r] of S.remotes) {
-    if (!ids.has(id)) { if (r.lane) { r.lane.fall(); S.falling.push(r.lane); } S.remotes.delete(id); }
+    if (visibleIds.has(id)) continue;
+    if (online.has(id)) r.lane.sink(); else r.lane.fall();
+    S.falling.push(r.lane);
+    S.remotes.delete(id);
   }
-  let idx = S.mode === 'play' ? 1 : 0, shown = 0;
-  for (const p of others) {
+  let idx = S.mode === 'play' ? 1 : 0;
+  for (const p of visible) {
     let r = S.remotes.get(p.id);
-    if (!r) { r = { id: p.id, samples: [], lane: null, x: 0 }; S.remotes.set(p.id, r); }
+    if (!r) {
+      r = { id: p.id, samples: [], x: 0, lane: new Lane(world, { id: p.id, color: p.color, name: p.name }) };
+      S.remotes.set(p.id, r);
+    }
     r.name = p.name; r.color = p.color; r.best = p.best; r.deaths = p.deaths;
-    if (shown < MAX_REMOTE_LANES) {
-      if (!r.lane) r.lane = new Lane(world, { id: p.id, color: p.color, name: p.name });
-      r.lane.index = idx++; shown++;
-    } else if (r.lane) { r.lane.fall(); S.falling.push(r.lane); r.lane = null; }
+    r.lane.index = idx++;
   }
+  const shown = visible.length;
   // attract lane: when nobody is running, the menu flies along the empty course
-  const wantAttract = S.mode === 'menu' && shown === 0;
+  const wantAttract = S.mode === 'menu' && shown === 0 && S.roster.length === 0;
   if (wantAttract && !S.attract) {
     S.attract = new Lane(world, { id: 0, color: '#8a80b0', name: '' });
     S.attract.attract = true; S.attract.drone.visible = false;
     S.attract.ax = 2.5;
-  } else if (!wantAttract && S.attract) { S.attract.fall(); S.falling.push(S.attract); S.attract = null; }
+  } else if (!wantAttract && S.attract) { S.attract.sink(); S.falling.push(S.attract); S.attract = null; }
 }
 
 // ------------------------------------------------------------------ menu / game transitions
@@ -124,6 +148,8 @@ function startGame() {
   S.mode = 'play';
   S.player.reset();
   S.best = 0; S.deaths = 0;
+  S.idleT = 0; S.idleX = S.player.x; S.idleY = S.player.y;
+  $('notice').hidden = true;
   S.localLane?.dispose();
   S.localLane = makeLocalLane();
   S.localLane.setRunner(S.player.x, S.player.y, ANIM.IDLE, 1, 0, 0);
@@ -137,10 +163,11 @@ function startGame() {
   syncLanes();
 }
 
-function toMenu() {
+function toMenu(tellServer = true) {
   if (S.mode !== 'play') return;
   S.mode = 'menu';
-  net.send({ t: 'menu' });
+  if (tellServer) net.send({ t: 'menu' });
+  $('idle-warn').hidden = true;
   if (S.localLane) { S.localLane.fall(); S.falling.push(S.localLane); S.localLane = null; }
   $('menu').hidden = false; $('hud').hidden = true; $('death').hidden = true;
   world.camTarget = { ...CAM_MENU };
@@ -149,6 +176,8 @@ function toMenu() {
   syncLanes();
   renderLists();
 }
+
+function showNotice(text) { $('notice').textContent = text; $('notice').hidden = false; }
 
 addEventListener('keydown', (e) => {
   if (e.code === 'Escape') toMenu();
@@ -167,7 +196,8 @@ const dist = (x) => Math.max(0, Math.floor(x - 2.5));
 function liveEntries() {
   const list = S.roster.map(p => {
     const me = p.id === S.myId && S.mode === 'play';
-    const x = me ? S.player.x : (S.remotes.get(p.id)?.x ?? 0);
+    const r = S.remotes.get(p.id);
+    const x = me ? S.player.x : r?.samples.length ? r.x : (S.board.get(p.id) ?? 0);
     return { id: p.id, name: p.name, color: p.color, d: dist(x), best: p.best, me };
   });
   return list.sort((a, b) => b.d - a.d);
@@ -182,8 +212,13 @@ function renderLists() {
   $('menu-hof').innerHTML = S.hof.length
     ? S.hof.map((h, i) => `<li><span class="n">${i + 1}. ${esc(h.name)}</span><span class="d">${h.dist} m</span></li>`).join('')
     : '<li class="empty">nobody survived yet</li>';
-  $('hud-live').innerHTML = live.slice(0, 10).map((p, i) =>
-    `<li class="${p.me ? 'me' : ''}"><span class="n" style="color:${p.color}">${i + 1}. ${esc(p.name)}</span><span class="d">${p.d} m</span></li>`).join('');
+  // top 10, plus your own rank if you are further down
+  const rows = live.map((p, i) => ({ ...p, rank: i + 1 }));
+  const shownRows = rows.slice(0, 10);
+  const mine = rows.find(p => p.me);
+  if (mine && mine.rank > 10) shownRows.push(mine);
+  $('hud-live').innerHTML = shownRows.map(p =>
+    `<li class="${p.me ? 'me' : ''}"><span class="n" style="color:${p.color}">${p.rank}. ${esc(p.name)}</span><span class="d">${p.d} m</span></li>`).join('');
 }
 setInterval(renderLists, 400);
 
@@ -271,26 +306,30 @@ function followView(dt, x, y, vx) {
 // menu "director": the broadcast camera cuts between live runners
 const director = { id: null, t: 0 };
 const CUT_EVERY = 8;
+// It steps through all runners in join order; the server streams the window around the watched
+// runner, so each cut shifts the window by one: one lane sinks away, one rises in.
 function directMenuCamera(dt) {
-  const cands = [...S.remotes.values()].filter(r => r.lane && r.lane.state !== 'fall' && r.samples.length);
+  const runners = S.roster;
+  if (!runners.length) { $('camfeed').hidden = true; return false; }
   director.t += dt;
-  let cur = cands.find(r => r.id === director.id);
-  if (!cur || (director.t > CUT_EVERY && cands.length > 1)) {
-    const i = cur ? cands.indexOf(cur) : -1;
-    const next = cands[(i + 1) % cands.length];
-    if (next) {
-      if (Math.abs(next.lane.rx - view.x) > 40) { view.snap = true; world.glitch = Math.max(world.glitch, 0.35); }
-      director.id = next.id; director.t = 0; cur = next;
+  let i = runners.findIndex(p => p.id === director.id);
+  if (i < 0 || (director.t > CUT_EVERY && runners.length > 1)) {
+    i = (i + 1) % runners.length;
+    director.id = runners[i].id; director.t = 0; director.cut = true;
+    net.send({ t: 'watch', id: director.id });
+  }
+  const txt = `CAM FEED · ${runners[i].name}`;
+  if ($('camfeed-name').textContent !== txt) $('camfeed-name').textContent = txt;
+  $('camfeed').hidden = false;
+  const r = S.remotes.get(director.id);
+  if (r?.samples.length) { // window may still be on its way after a cut
+    if (director.cut) {
+      if (Math.abs(r.lane.rx - view.x) > 40) { view.snap = true; world.glitch = Math.max(world.glitch, 0.35); }
+      director.cut = false;
     }
+    followView(dt, r.lane.rx, r.lane.ry, r.lane.vx);
   }
-  $('camfeed').hidden = !cur;
-  if (cur) {
-    const txt = `CAM FEED · ${cur.name}`;
-    if ($('camfeed-name').textContent !== txt) $('camfeed-name').textContent = txt;
-    followView(dt, cur.lane.rx, cur.lane.ry, cur.lane.vx);
-    return true;
-  }
-  return false;
+  return true;
 }
 
 // ------------------------------------------------------------------ main loop
@@ -313,11 +352,19 @@ function frame(now) {
       S.localLane.setRunner(p.x, p.y, p.anim, p.facing, dt, p.runPhase);
       if (p.sliding && Math.random() < 0.5) S.localLane.sparks();
       if (p.wallSliding && Math.random() < 0.25) S.localLane.particles.emit(p.x - p.facing * 0.3, p.y + 1.2, 1, '#cfcbe8', 1, 0, 0.3);
+      // used wall: no grip – red scrape sparks show you need the other wall
+      if (p.wallBlocked && Math.random() < 0.5) S.localLane.particles.emit(p.x + p.facing * 0.32, p.y + 0.9, 2, ['#ff2a6d', '#ff6040'], 2, 1.5, 0.25);
       S.best = Math.max(S.best, p.distance);
       S.sendT -= dt * 1000;
       if (S.sendT <= 0) { S.sendT = SEND_INTERVAL; net.send({ t: 's', x: +p.x.toFixed(2), y: +p.y.toFixed(2), a: p.anim, f: p.facing }); }
       followView(dt, p.x, p.y, p.vx);
       updateHud();
+      // idle warning (the server ends the run after IDLE_LIMIT seconds without movement)
+      if (Math.abs(p.x - S.idleX) > 0.05 || Math.abs(p.y - S.idleY) > 0.05) { S.idleT = 0; S.idleX = p.x; S.idleY = p.y; }
+      else S.idleT += dt;
+      const warn = S.idleT > IDLE_WARN;
+      $('idle-warn').hidden = !warn;
+      if (warn) $('idle-warn').textContent = `MOVE! OFF AIR IN ${Math.max(0, Math.ceil(IDLE_LIMIT - S.idleT))} s`;
     }
 
     // remote runners
@@ -345,7 +392,7 @@ function frame(now) {
     if (S.attract) lanes.push(S.attract);
     for (const l of lanes) l.update(dt, t, view, world.halfWidthAt(l.z ?? -l.index * LANE_GAP));
     for (let i = S.falling.length - 1; i >= 0; i--) {
-      if (S.falling[i].fallT > 3) { S.falling[i].dispose(); S.falling.splice(i, 1); }
+      if (S.falling[i].gone) { S.falling[i].dispose(); S.falling.splice(i, 1); }
     }
   }
 
