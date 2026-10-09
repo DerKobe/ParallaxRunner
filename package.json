@@ -8,8 +8,7 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "bots": "node tools/bots.js 5",
-    "demo": "node server.js --bots 6",
-    "demo:zap": "node server.js --bots 6 --zap"
+    "demo": "node server.js --bots 6"
   },
   "license": "ISC",
   "dependencies": {

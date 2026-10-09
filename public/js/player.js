@@ -2,7 +2,7 @@
 // wall slide / wall jump, slide with crawl under low ceilings).
 import { isSolid, HAZARD, HAZARD_HEIGHT } from './level.js';
 
-export const ANIM = { IDLE: 0, RUN: 1, JUMP: 2, FALL: 3, DJUMP: 4, WALL: 5, SLIDE: 6, DEAD: 7, KO: 8 };
+export const ANIM = { IDLE: 0, RUN: 1, JUMP: 2, FALL: 3, DJUMP: 4, WALL: 5, SLIDE: 6, DEAD: 7 };
 
 const P = {
   W: 0.62, STAND_H: 1.55, SLIDE_H: 0.75,
@@ -34,7 +34,7 @@ export class Player {
     this.coyote = 0; this.jumpBuf = 0; this.lock = 0;
     this.wallDir = 0; this.wallSliding = false;
     this.lastWall = null; this.wallBlocked = false;
-    this.spin = 0; this.runPhase = 0; this.koT = 0;
+    this.spin = 0; this.runPhase = 0;
     this.dead = false; this.deadTimer = 0;
     this.maxX = this.x; this.runTime = 0;
     this.acc = 0;
@@ -64,20 +64,10 @@ export class Player {
     while (this.acc >= P.STEP && !this.dead) { this.step(P.STEP, input); this.acc -= P.STEP; }
   }
 
-  // hit by a neighbour's shot: no control for a moment, momentum is lost – over a pit you fall
-  knockOut(seconds) {
-    if (this.dead) return;
-    this.koT = Math.max(this.koT, seconds);
-    this.vx *= 0.35; this.vy = Math.min(this.vy, 0);
-    this.spin = 0; this.jumpBuf = 0; this.jumpHeld = false;
-    this.events.push({ type: 'ko' });
-  }
-
   step(dt, input) {
     let dir = (input.held('right') ? 1 : 0) - (input.held('left') ? 1 : 0);
-    let down = input.held('down');
+    const down = input.held('down');
     if (this.lock > 0) { this.lock -= dt; dir = 0; }
-    if (this.koT > 0) { this.koT -= dt; dir = 0; down = false; this.jumpBuf = 0; }
     this.jumpBuf -= dt;
     this.coyote = this.onGround ? P.COYOTE : this.coyote - dt;
     this.spin = Math.max(0, this.spin - dt);
@@ -215,7 +205,6 @@ export class Player {
 
   get anim() {
     if (this.dead) return ANIM.DEAD;
-    if (this.koT > 0) return ANIM.KO;
     if (this.sliding) return ANIM.SLIDE;
     if (this.wallSliding) return ANIM.WALL;
     if (!this.onGround) return this.spin > 0 ? ANIM.DJUMP : this.vy > 0 ? ANIM.JUMP : ANIM.FALL;

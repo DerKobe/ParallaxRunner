@@ -9,9 +9,6 @@ import { Sfx } from './audio.js';
 import { Hunter, HS } from './hunter.js';
 
 const $ = (id) => document.getElementById(id);
-const SHOT_COOLDOWN = 1.5;   // s
-const KO_RUNNER = 1;         // s a zapped runner is knocked out
-const KO_HUNTER = 3;         // s until a shot-down stalker is replaced
 const AFK_LIMIT = 3;         // caught this often at the start without moving → run ends
 const INTERP_DELAY = 110; // ms
 const SEND_INTERVAL = 50; // ms
@@ -32,7 +29,7 @@ const S = {
   board: new Map(),     // id -> x for every runner (1 Hz), for the live lists
   falling: [],          // lanes currently dropping/sinking out of view
   level: null, player: null, hunter: null, localLane: null, attract: null,
-  shotCd: 0, afk: 0, afkKick: false, alarmT: 0,
+  afk: 0, afkKick: false, alarmT: 0,
   sendT: 0, best: 0, deaths: 0, deadUntil: 0,
 };
 
@@ -67,27 +64,6 @@ const net = new Net({
     if (S.mode !== 'play') return;
     toMenu(false);
     showNotice(m.reason === 'stale' ? 'SIGNAL LOST – your game stopped sending (inactive tab?). Run ended.' : 'Your run was ended.');
-  },
-  hit(m) { // a neighbour's zap got us or our stalker
-    if (S.mode !== 'play' || S.player.dead) return;
-    if (m.kind === 'runner') {
-      S.player.knockOut(KO_RUNNER);
-      world.glitch = Math.max(world.glitch, 0.5);
-      feed(`${m.name} ZAPPED YOU!`, 'bad');
-    } else if (m.kind === 'hunter' && S.hunter.knockDown(KO_HUNTER)) {
-      sfx.boom();
-      feed(`${m.name} SHOT DOWN YOUR STALKER · +${KO_HUNTER} s`, 'good');
-    }
-  },
-  shot(m) { // somebody in our window fired: draw the beam between their lane and the target's
-    const from = S.remotes.get(m.from);
-    if (!from) return;
-    const target = m.target === S.myId ? S.localLane : S.remotes.get(m.target)?.lane;
-    world.fireShot({
-      x: m.x, y: m.y + 0.9, z0: from.lane.z, z1: target ? target.z : farLaneZ(), color: from.color,
-      onArrive: () => { if (target) impact(target, m.kind); },
-    });
-    sfx.zap(0.35);
   },
   snap(m) {
     const now = performance.now();
@@ -173,7 +149,7 @@ function startGame() {
   S.mode = 'play';
   S.player.reset();
   S.hunter.reset();
-  S.best = 0; S.deaths = 0; S.shotCd = 0; S.afk = 0; S.afkKick = false;
+  S.best = 0; S.deaths = 0; S.afk = 0; S.afkKick = false;
   $('notice').hidden = true;
   S.localLane?.dispose();
   S.localLane = makeLocalLane();
@@ -361,48 +337,6 @@ function directMenuCamera(dt) {
   return true;
 }
 
-// ------------------------------------------------------------------ zap shots
-// A shot flies straight into the depth through the lanes behind you (same x/y as you) and hits
-// the first runner or stalker in its way. The shooter's view decides; the server checks plausibility.
-function farLaneZ() { return -(S.remotes.size + 1.5) * LANE_GAP; }
-
-function shoot() {
-  const p = S.player;
-  if (S.shotCd > 0 || p.dead || p.koT > 0) return;
-  S.shotCd = SHOT_COOLDOWN;
-  const lanes = [...S.remotes.values()].filter(r => r.lane.state !== 'fall' && r.lane.state !== 'sink')
-    .sort((a, b) => a.lane.index - b.lane.index);
-  let hit = null;
-  for (const r of lanes) {
-    const l = r.lane;
-    if (l.anim !== ANIM.DEAD && Math.abs(l.rx - p.x) < 0.75 && Math.abs(l.ry - p.y) < 1.1) { hit = { r, kind: 'runner' }; break; }
-    if (l.hs === HS.CHASE && !l.wreck && Math.abs(l.hx - p.x) < 0.95 && Math.abs(l.hy - p.y) < 1.4) { hit = { r, kind: 'hunter' }; break; }
-  }
-  world.fireShot({
-    x: p.x + p.facing * 0.3, y: p.y + 0.9, z0: 0.6, z1: hit ? hit.r.lane.z : farLaneZ(), color: S.color,
-    onArrive: () => { if (hit) impact(hit.r.lane, hit.kind); },
-  });
-  S.localLane.particles.emit(p.x + p.facing * 0.3, p.y + 0.9, 6, [S.color, '#ffffff'], 3, 2, 0.25);
-  net.send({ t: 'shoot', x: +p.x.toFixed(2), y: +p.y.toFixed(2), target: hit?.r.id ?? null, kind: hit?.kind ?? null });
-  sfx.zap(1);
-  if (hit) feed(hit.kind === 'runner' ? `YOU ZAPPED ${hit.r.name}` : `YOU SHOT DOWN ${hit.r.name}'S STALKER`, 'info');
-}
-
-function impact(lane, kind) {
-  if (kind === 'runner') lane.particles.emit(lane.rx, lane.ry + 0.9, 18, ['#ffffff', '#05d9e8', '#f9c80e'], 7, 6, 0.5);
-  else if (kind === 'hunter') lane.particles.emit(lane.hx, lane.hy + 1.1, 12, ['#ffffff', '#ff2030'], 6, 5, 0.4);
-}
-
-function feed(text, kind = 'info') {
-  const el = document.createElement('div');
-  el.className = `feed-item ${kind}`;
-  el.textContent = text;
-  $('feed').prepend(el);
-  setTimeout(() => el.classList.add('out'), 2600);
-  setTimeout(() => el.remove(), 3200);
-  while ($('feed').children.length > 4) $('feed').lastChild.remove();
-}
-
 // ------------------------------------------------------------------ main loop
 let last = performance.now();
 function frame(now) {
@@ -418,12 +352,9 @@ function frame(now) {
     // local runner
     if (S.mode === 'play' && S.localLane) {
       const p = S.player, h = S.hunter;
-      S.shotCd = Math.max(0, S.shotCd - dt);
-      if (input.pressed('shoot')) shoot();
       p.update(dt, input);
       if (!p.dead && h.update(dt)) p.die('caught');
       handleEvents(p.events.splice(0));
-      handleHunterEvents(h.events.splice(0));
     }
     // (the events above may have ended the run, e.g. the no-show rule)
     if (S.mode === 'play' && S.localLane) {
@@ -492,7 +423,6 @@ function handleEvents(events) {
       case 'land': if (e.speed > 9) { sfx.land(e.speed); lane.dust(Math.min(12, e.speed / 2)); } break;
       case 'slide': sfx.slide(); break;
       case 'bonk': sfx.bonk(); break;
-      case 'ko': sfx.zapped(); break;
       case 'die': {
         sfx.die(); lane.burst(); world.glitch = 1.2;
         S.deaths++;
@@ -522,33 +452,22 @@ function handleEvents(events) {
   }
 }
 
-function handleHunterEvents(events) {
-  for (const e of events) {
-    if (e.type === 'return') { sfx.alarm(); feed('A NEW STALKER IS ON YOUR TRAIL', 'bad'); }
-  }
-}
-
 function updateStalkerHud(dt) {
   const h = S.hunter, p = S.player;
   const el = $('stalker');
   let danger = 0;
   if (p.dead) { el.textContent = 'STALKER –'; el.className = 'stalker'; }
-  else if (h.state === HS.DOWN) {
-    el.textContent = `STALKER DOWN · ${h.downT.toFixed(1)} s`; el.className = 'stalker good';
-  } else if (h.ht < 0) {
+  else if (h.ht < 0) {
     el.textContent = `STALKER INBOUND · ${(-h.ht).toFixed(1)} s`; el.className = 'stalker';
   } else {
     const gap = Math.max(0, Math.hypot(p.x - h.x, p.y - h.y));
-    el.textContent = `STALKER ${gap.toFixed(1)} m${h.bonus ? ` · +${h.bonus} s HEAD START` : ''}`;
+    el.textContent = `STALKER ${gap.toFixed(1)} m`;
     danger = THREE.MathUtils.clamp(1 - (gap - 1) / 4, 0, 1);
     el.className = `stalker${danger > 0.4 ? ' bad' : ''}`;
   }
   $('danger').style.opacity = danger * 0.85;
   S.alarmT -= dt;
   if (danger > 0.4 && S.alarmT <= 0) { sfx.beep(); S.alarmT = 0.55 - danger * 0.35; }
-  const zap = $('zap');
-  zap.textContent = S.shotCd > 0 ? `ZAP ${S.shotCd.toFixed(1)} s` : 'ZAP READY [F]';
-  zap.className = `zap${S.shotCd > 0 ? '' : ' ready'}`;
 }
 
 function updateHud() {

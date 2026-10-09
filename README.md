@@ -7,8 +7,6 @@ Alle anderen Spieler laufen live in eigenen Bahnen **hinter** dir. Die Bahnen li
 
 **Stalker:** Jeder Runner wird von einer Jäger-Drohne verfolgt, die exakt seine eigene Route mit Zeitversatz abfliegt (4,5 s am Start, schrumpft mit der Distanz bis 2,5 s). Wer zu lange stehen bleibt oder umkehrt, wird eingeholt und stirbt. Wer dreimal am Start erwischt wird, ohne sich zu bewegen, fliegt aus der Sendung. Sendet ein Client gar nichts mehr (z. B. inaktiver Tab), beendet der Server den Lauf nach 5 s (`STALE_TIMEOUT_MS`).
 
-**Zap:** Mit F/X schießt du gerade in die Tiefe durch die Bahnen hinter dir. Der erste Runner oder Stalker auf deiner Position wird getroffen: Ein Runner ist 1 s KO (über einem Abgrund stürzt er ab), ein Stalker stürzt ab und wird nach 3 s ersetzt – der neue folgt mit 3 s mehr Abstand, dieser Vorsprung bleibt bis zum nächsten Tod (mehrere Abschüsse addieren sich). Abklingzeit 1,5 s.
-
 ## Start
 
 ```bash
@@ -21,11 +19,10 @@ Optional: `SEED=1234 npm start` für eine feste Strecke, `PORT=8080` für einen 
 
 ```bash
 npm run demo        # Server + 6 Bots in einem Rutsch
-npm run demo:zap    # dasselbe, Bots schießen auch (auf Nachbarn und deren Stalker)
 npm run bots        # 5 Bots zu einem bereits laufenden Server hinzufügen
 ```
 
-Eigene Anzahl: `node server.js --bots 10 --zap` bzw. `node tools/bots.js 8 --zap --url ws://host:port/ws`.
+Eigene Anzahl: `node server.js --bots 10` bzw. `node tools/bots.js 8 --url ws://host:port/ws`.
 
 Die Bots spielen wirklich: gleiche Strecke, Physik und Stalker wie Menschen. Alle 0,1 s spielen sie ein paar zufällige Eingabefolgen ~1 s voraus durch und nehmen die beste (`tools/botbrain.js`). Ihr Können ist über die Bots verteilt – vom tollpatschigen Bot, der oft stirbt und zögert, bis zum Profi, der Kamine hochklettert und mit fast Höchsttempo läuft. Rechenlast: ca. 17 % eines CPU-Kerns für Server + 6 Bots.
 
@@ -36,7 +33,6 @@ Die Bots spielen wirklich: gleiche Strecke, Physik und Stalker wie Menschen. All
 | Laufen | ← → / A D |
 | Springen, Double-Jump (in der Luft nochmal), Wall-Jump (an einer Wand) | Space / ↑ / W |
 | Rutschen (beim Laufen) | ↓ / S / Shift |
-| Zap (in die Bahnen hinter dir) | F / X |
 | Menü | Esc |
 | Sound an/aus | M |
 

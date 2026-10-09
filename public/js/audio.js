@@ -66,10 +66,6 @@ export class Sfx {
   }
   respawn() { [440, 554, 659, 880].forEach((f, i) => this.tone(f, 0.1, { vol: 0.1, delay: i * 0.06 })); }
   click() { this.tone(900, 0.05, { vol: 0.08 }); }
-  zap(vol = 1) { this.tone(1800, 0.16, { type: 'sawtooth', to: 220, vol: 0.16 * vol }); this.noise(0.08, { vol: 0.12 * vol, freq: 4000, type: 'highpass' }); }
-  zapped() { this.tone(120, 0.5, { type: 'sawtooth', to: 60, vol: 0.2 }); this.noise(0.4, { vol: 0.25, freq: 2500, type: 'bandpass', q: 6 }); }
-  boom() { this.noise(0.7, { vol: 0.45, freq: 400 }); this.tone(160, 0.5, { type: 'triangle', to: 40, vol: 0.25 }); }
-  alarm() { [0, 0.18, 0.36].forEach(d => this.tone(980, 0.12, { vol: 0.12, delay: d })); }
   beep() { this.tone(1320, 0.07, { vol: 0.09, type: 'square' }); }
 
   startMusic() {

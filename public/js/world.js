@@ -273,22 +273,12 @@ export class Lane {
     this.beam = new THREE.Mesh(world.beamGeo, world.beamMat);
     this.beam.visible = false;
     this.group.add(this.hunter, this.beam);
-    this.hx = 0; this.hy = 0; this.hs = HS.NONE; this.flyIn = 0; this.wreck = null;
+    this.hx = 0; this.hy = 0; this.hs = HS.NONE;
 
     this.particles = new Particles(this.group);
   }
 
-  setHunter(hx, hy, hs) {
-    if (hs === HS.DOWN && this.hs === HS.CHASE) this.crashHunter();
-    if (hs === HS.CHASE && this.hs === HS.DOWN) this.flyIn = 1;
-    this.hx = hx; this.hy = hy; this.hs = hs;
-  }
-
-  crashHunter() {
-    const x = this.hx, y = this.hy + 1.1;
-    this.particles.emit(x, y, 30, ['#ff2030', '#f9c80e', '#ffffff', '#ff8c00'], 10, 8, 0.8);
-    this.wreck = { x, y, vy: 2, vx: 1.5, rot: 0, t: 0 };
-  }
+  setHunter(hx, hy, hs) { this.hx = hx; this.hy = hy; this.hs = hs; }
 
   setRunner(x, y, anim, facing, dt, runPhase) {
     this.vx = dt > 0 ? (x - this.rx) / dt : 0;
@@ -387,9 +377,6 @@ export class Lane {
     this.droneLight.visible = Math.floor(t * 2.5 + this.id) % 2 === 0;
     if (this.light) { this.light.position.x = this.rx; this.light.position.y = this.ry + 1.4; }
 
-    if (this.anim === ANIM.KO && Math.random() < 0.3) {
-      this.particles.emit(this.rx, this.ry + 1.9, 1, ['#f9c80e', '#ffffff'], 2.5, 1.5, 0.4);
-    }
     this.updateHunter(dt, t);
     this.particles.update(dt);
     this.updateChunks(view.x, viewHalfWidth);
@@ -397,24 +384,13 @@ export class Lane {
 
   updateHunter(dt, t) {
     const h = this.hunter;
-    if (this.wreck) { // shot-down drone tumbles into the abyss
-      const w = this.wreck;
-      w.t += dt; w.vy -= 22 * dt; w.x += w.vx * dt; w.y += w.vy * dt; w.rot += 7 * dt;
-      h.visible = true; h.position.set(w.x, w.y, 0.4); h.rotation.z = -w.rot;
-      this.hunterEye.visible = false; this.beam.visible = false;
-      if (Math.random() < 0.6) this.particles.emit(w.x, w.y, 1, ['#3a3d52', '#5d6280', '#ff8c00'], 1, 1, 0.6);
-      if (w.t > 2.2) { this.wreck = null; h.rotation.z = 0; }
-      return;
-    }
     const chasing = this.hs === HS.CHASE;
     h.visible = chasing;
     this.beam.visible = false;
     if (!chasing) return;
-    this.flyIn = Math.max(0, this.flyIn - dt * 1.4);
     const bob = Math.sin(t * 3.1 + this.id) * 0.15;
-    const hx = this.hx, hy = this.hy + 1.15 + bob + this.flyIn * this.flyIn * 9;
+    const hx = this.hx, hy = this.hy + 1.15 + bob;
     h.position.set(hx, hy, 0.4);
-    h.rotation.z = 0;
     h.scale.x = this.rx >= hx ? 1 : -1;
     this.hunterEye.visible = Math.floor(t * 6) % 3 !== 0;
     // searchlight on the runner
@@ -540,9 +516,6 @@ export class World {
     this.hunterMat = new THREE.MeshBasicMaterial({ map: makeHunterTexture(), alphaTest: 0.5, side: THREE.DoubleSide });
     this.beamGeo = new THREE.ConeGeometry(0.45, 1, 14, 1, true).translate(0, -0.5, 0).rotateZ(Math.PI / 2);
     this.beamMat = new THREE.MeshBasicMaterial({ color: '#ff3040', transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
-    // zap shots travelling through the lanes (into / out of the screen)
-    this.shots = [];
-    this.shotGeo = new THREE.BoxGeometry(0.16, 0.16, 1.8);
 
     this.setupLights();
     this.setupBackground();
@@ -720,37 +693,7 @@ export class World {
 
     this.matHaz.emissiveIntensity = 1.2 + Math.sin(t * 40) * 0.3 + (Math.random() < 0.05 ? 0.8 : 0);
     this.glitch = Math.max(0, this.glitch - dt * 1.6);
-    this.updateShots(dt, viewX, viewY);
     this.chunks?.gc();
-  }
-
-  // x/y in course coordinates, z0 → z1 in view space (lane depths); onArrive fires at the end
-  fireShot({ x, y, z0, z1, color = '#05d9e8', onArrive }) {
-    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
-    const mesh = new THREE.Mesh(this.shotGeo, mat);
-    this.glowTex ??= new Map();
-    if (!this.glowTex.has(color)) this.glowTex.set(color, makeGlowSprite(color));
-    const glow = new THREE.Mesh(this.glowGeo, new THREE.MeshBasicMaterial({ map: this.glowTex.get(color), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
-    glow.scale.setScalar(1.4);
-    mesh.add(glow);
-    this.lanesRoot.add(mesh);
-    this.shots.push({ x, y, z: z0, z1, dir: Math.sign(z1 - z0) || -1, mesh, onArrive });
-  }
-
-  updateShots(dt, viewX, viewY) {
-    for (let i = this.shots.length - 1; i >= 0; i--) {
-      const s = this.shots[i];
-      s.z += s.dir * 48 * dt;
-      const done = s.dir < 0 ? s.z <= s.z1 : s.z >= s.z1;
-      if (done) s.z = s.z1;
-      s.mesh.position.set(s.x - viewX, s.y - viewY, s.z);
-      if (done) {
-        s.onArrive?.();
-        this.lanesRoot.remove(s.mesh);
-        s.mesh.material.dispose(); s.mesh.children[0].material.dispose();
-        this.shots.splice(i, 1);
-      }
-    }
   }
 
   render(t) {

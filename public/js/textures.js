@@ -141,8 +141,8 @@ export function slotUV(s) {
 }
 
 // ------------------------------------------------------------------ runner sprite sheet
-export const FRAME = { IDLE: 0, RUN: 2, RUN_N: 6, JUMP: 8, FALL: 9, DJUMP: 10, DJUMP_N: 4, WALL: 14, SLIDE: 15, DEAD: 17, KO: 18 };
-export const SHEET_FRAMES = 19;
+export const FRAME = { IDLE: 0, RUN: 2, RUN_N: 6, JUMP: 8, FALL: 9, DJUMP: 10, DJUMP_N: 4, WALL: 14, SLIDE: 15, DEAD: 17 };
+export const SHEET_FRAMES = 18;
 export const CELL = 32;
 
 function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
@@ -277,7 +277,6 @@ const POSES = {
   tuck: { lean: 0.45, hipY: 10, coat: 1.0, legs: [[1.5, -0.2], [1.8, 0.1]], arms: [[0.7, 1.6], [0.9, 1.9]] },
   wall: { lean: -0.12, hipY: 12, coat: -0.35, hipX: 1, legs: [[-0.7, -0.15], [0.55, 0.05]], arms: [[-2.5, -2.8], [0.9, 0.6]] },
   slide0: { lean: -1.15, hipY: 4, hipX: -3, coat: 1.25, legs: [[1.0, -0.4], [1.45, 1.55]], arms: [[-1.2, -1.5], [1.7, 2.2]] },
-  ko: { lean: 0.55, hipY: 9, hipX: -1, coat: 0.15, legs: [[0.55, -0.35], [0.85, -0.15]], arms: [[0.25, 0.1], [0.45, 0.3]] },
   slide1: { lean: -1.1, hipY: 4, hipX: -3, coat: 1.4, legs: [[1.05, -0.35], [1.45, 1.55]], arms: [[-1.25, -1.5], [1.6, 2.1]] },
 };
 
@@ -301,7 +300,6 @@ export function makeRunnerSheet(color) {
   draw(FRAME.WALL, POSES.wall);
   draw(FRAME.SLIDE, POSES.slide0); draw(FRAME.SLIDE + 1, POSES.slide1);
   draw(FRAME.DEAD, POSES.fall);
-  draw(FRAME.KO, POSES.ko);
   return pixelTexture(c);
 }
 

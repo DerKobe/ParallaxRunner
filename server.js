@@ -22,9 +22,7 @@ const VIEW_SIZE = VIEW_SIDE * 2 + 1;
 // Standing still is punished in the game world by the Stalker. This only catches frozen clients
 // (e.g. a hidden tab stops sending): no state update for this long → run ends.
 const STALE_TIMEOUT = Number(process.env.STALE_TIMEOUT_MS) || 5_000;
-const SHOT_COOLDOWN = 1200;  // ms, server-side floor (client uses 1.5 s)
-const SHOT_REACH = 3;        // tiles: plausibility tolerance for client-reported hits
-const HUNTER = { CHASE: 0, DOWN: 1, NONE: 2 };
+const HUNTER = { CHASE: 0, NONE: 1 };
 
 const COLORS = ['#ff2a6d', '#05d9e8', '#f9c80e', '#7b61ff', '#39ff14', '#ff8c00', '#ff00ff', '#00ffc6', '#ff4040', '#4da6ff'];
 
@@ -109,8 +107,8 @@ wss.on('connection', (ws) => {
   const c = {
     id: nextId++, ws, mode: 'spectate', name: '', color: COLORS[colorCursor++ % COLORS.length], order: 0,
     x: 0, y: 0, anim: 0, facing: 1, best: 0, deaths: 0, runStart: Date.now(), msgBudget: 60,
-    lastStateAt: Date.now(), watch: null, viewKey: '', viewIds: [],
-    hx: 0, hy: 0, hs: HUNTER.NONE, lastShot: 0,
+    lastStateAt: Date.now(), watch: null, viewKey: '',
+    hx: 0, hy: 0, hs: HUNTER.NONE,
   };
   clients.set(c.id, c);
   send(ws, { t: 'welcome', id: c.id, seed: SEED, color: c.color, tick: TICK_HZ });
@@ -137,25 +135,8 @@ wss.on('connection', (ws) => {
         if (c.mode !== 'play') break;
         c.x = num(m.x, -2, 1e6); c.y = num(m.y, -50, 100);
         c.lastStateAt = Date.now();
-        if (Array.isArray(m.h)) { c.hx = num(m.h[0], -100, 1e6); c.hy = num(m.h[1], -50, 100); c.hs = num(m.h[2] | 0, 0, 2); }
+        if (Array.isArray(m.h)) { c.hx = num(m.h[0], -100, 1e6); c.hy = num(m.h[1], -50, 100); c.hs = num(m.h[2] | 0, 0, 1); }
         c.anim = num(m.a | 0, 0, 15); c.facing = m.f < 0 ? -1 : 1;
-        break;
-      }
-      case 'shoot': { // zap straight into the parallel lanes; the shooter's client reports what it hit
-        if (c.mode !== 'play') break;
-        const now = Date.now();
-        if (now - c.lastShot < SHOT_COOLDOWN) break;
-        c.lastShot = now;
-        const x = num(m.x, -2, 1e6), y = num(m.y, -50, 100);
-        let target = null, kind = null;
-        const t = clients.get(m.target);
-        if (t && t !== c && t.mode === 'play' && c.viewIds.includes(t.id)) {
-          if (m.kind === 'runner' && Math.abs(t.x - c.x) < SHOT_REACH && Math.abs(t.y - c.y) < SHOT_REACH) { target = t; kind = 'runner'; }
-          if (m.kind === 'hunter' && t.hs === HUNTER.CHASE && Math.abs(t.hx - c.x) < SHOT_REACH && Math.abs(t.hy - c.y) < SHOT_REACH) { target = t; kind = 'hunter'; }
-        }
-        if (target) send(target.ws, { t: 'hit', kind, by: c.id, name: c.name });
-        const shot = JSON.stringify({ t: 'shot', from: c.id, x, y, target: target?.id ?? null, kind });
-        for (const o of clients.values()) if (o !== c && o.viewIds.includes(c.id)) send(o.ws, shot);
         break;
       }
       case 'watch': // menu spectators choose whose neighbourhood they watch
@@ -204,7 +185,7 @@ setInterval(() => {
     const start = Math.max(0, Math.min(center - VIEW_SIDE, players.length - VIEW_SIZE));
     const win = entries.slice(start, start + VIEW_SIZE);
     const key = win.map(e => e[0]).join(',');
-    if (key !== c.viewKey) { c.viewKey = key; c.viewIds = win.map(e => e[0]); send(c.ws, { t: 'view', ids: c.viewIds }); }
+    if (key !== c.viewKey) { c.viewKey = key; send(c.ws, { t: 'view', ids: win.map(e => e[0]) }); }
     send(c.ws, { t: 'snap', ts, p: win });
   }
 }, 1000 / TICK_HZ);
@@ -227,10 +208,10 @@ setInterval(() => {
 
 server.listen(PORT, () => {
   console.log(`Parallax Runner running on http://localhost:${PORT}  (track seed ${SEED})`);
-  // local testing: `node server.js --bots 6 [--zap]` fills the server with playing bots
+  // local testing: `node server.js --bots 6` fills the server with playing bots
   const argv = process.argv.slice(2), bi = argv.indexOf('--bots');
   if (bi >= 0) {
     const count = Number(argv[bi + 1]) || 5;
-    import('./tools/bots.js').then(m => m.spawnBots(count, { url: `ws://localhost:${PORT}/ws`, zap: argv.includes('--zap') }));
+    import('./tools/bots.js').then(m => m.spawnBots(count, { url: `ws://localhost:${PORT}/ws` }));
   }
 });

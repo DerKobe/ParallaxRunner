@@ -9,19 +9,15 @@ const FRAME = 1 / 60;
 const CHUNK = 6; // frames per planned action (0.1 s)
 
 class SimInput {
-  constructor() { this.a = { dir: 0, jump: false, down: false, shoot: false }; this.prevJump = false; this.prevShoot = false; }
-  set(a) { this.prevJump = this.a.jump; this.prevShoot = this.a.shoot; this.a = a; }
-  hold() { this.prevJump = this.a.jump; this.prevShoot = this.a.shoot; } // same keys, no new presses
+  constructor() { this.a = { dir: 0, jump: false, down: false }; this.prevJump = false; }
+  set(a) { this.prevJump = this.a.jump; this.a = a; }
+  hold() { this.prevJump = this.a.jump; } // same keys, no new presses
   held(k) {
     if (k === 'right') return this.a.dir > 0;
     if (k === 'left') return this.a.dir < 0;
     return !!this.a[k];
   }
-  pressed(k) {
-    if (k === 'jump') return this.a.jump && !this.prevJump;
-    if (k === 'shoot') return this.a.shoot && !this.prevShoot;
-    return false;
-  }
+  pressed(k) { return k === 'jump' && this.a.jump && !this.prevJump; }
 }
 
 function clonePlayer(p) {
@@ -107,7 +103,7 @@ export class BotBrain {
   // call once per 1/60 s frame; returns the input object for Player.update
   next() {
     if (this.frame % CHUNK === 0) {
-      this.current = this.p.dead || this.p.koT > 0 ? { dir: 0, jump: false, down: false } : this.decide();
+      this.current = this.p.dead ? { dir: 0, jump: false, down: false } : this.decide();
       this.input.set(this.current);
     } else {
       this.input.hold();
