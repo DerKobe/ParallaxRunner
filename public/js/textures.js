@@ -439,6 +439,17 @@ export function makeHunterTexture() {
   return pixelTexture(c);
 }
 
+// Neon grave cross for course markers, 12x18
+export function makeCrossTexture(color) {
+  const [c, ctx] = canvas(12, 18);
+  const p = (x, y, w, h, col) => { ctx.fillStyle = col; ctx.fillRect(x, y, w, h); };
+  p(4, 0, 4, 18, shade(color, 0.35)); p(0, 4, 12, 4, shade(color, 0.35));   // glow halo
+  p(5, 1, 2, 16, color); p(1, 5, 10, 2, color);                             // neon tube
+  p(5, 1, 1, 16, mix(color, '#ffffff', 0.6)); p(1, 5, 10, 1, mix(color, '#ffffff', 0.6));
+  p(3, 16, 6, 2, '#2b2f45');                                                // little base
+  return pixelTexture(c);
+}
+
 // Patrolling enemies, two animation frames each (facing right)
 export function makeEnemyTextures() {
   const sheet = (w, h, draw) => [0, 1].map((f) => {

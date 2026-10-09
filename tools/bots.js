@@ -52,7 +52,7 @@ function spawnBot(i, count, { url }) {
         p.update(1 / 60, brain.next());
         if (!p.dead && h.update(1 / 60)) p.die('caught');
         for (const e of p.events.splice(0)) {
-          if (e.type === 'die') ws.send(JSON.stringify({ t: 'die', d: e.distance }));
+          if (e.type === 'die') ws.send(JSON.stringify({ t: 'die', d: e.distance, x: +e.x.toFixed(1), y: +e.y.toFixed(1) }));
           if (e.type === 'respawn') { h.reset(); brain.reset(); }
         }
       }

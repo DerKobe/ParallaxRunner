@@ -7,6 +7,8 @@ Alle anderen Spieler laufen live in eigenen Bahnen **hinter** dir. Die Bahnen li
 
 **Patrouillen:** Drei Gegnertypen bewachen kurze Abschnitte, Berührung ist tödlich: der **Crawler** (Spinnen-Drohne, läuft am Boden hin und her → drüberspringen), die **Sentry** (Schwebemine, fährt hoch und runter → durch, wenn sie oben ist), der **Hover-Cop** (Polizei-Gleiter knapp über Kopfhöhe → drunter durchlaufen, nicht springen). Ihre Bewegung hängt nur von der Server-Uhr ab, deshalb sehen alle Clients sie synchron ohne zusätzlichen Netzwerkverkehr. Mit der Distanz werden sie schneller und häufiger.
 
+**Streckenmarker:** Wo Runner sterben, erscheinen Neonkreuze auf der Strecke (nur in der vordersten Bahn). Tode nahe beieinander werden zu einem Kreuz mit Zähler (×N) zusammengefasst. Jeder Spieler hat genau einen Marker mit Namen an seiner Bestmarke (ab 20 m); dicht beieinander liegende Bestmarken teilen sich ein Schild (+N), Tode direkt daneben erscheinen dort als ☠N. Höchstens 250 Marker pro Strecke (`MAX_MARKERS`) – namenlose fliegen zuerst raus (wenigste Tode, älteste zuerst). Gespeichert in `data/markers.json`.
+
 **Stalker:** Jeder Runner wird von einer Jäger-Drohne verfolgt, die exakt seine eigene Route mit Zeitversatz abfliegt (4,5 s am Start, schrumpft mit der Distanz bis 2,5 s). Wer zu lange stehen bleibt oder umkehrt, wird eingeholt und stirbt. Wer dreimal am Start erwischt wird, ohne sich zu bewegen, fliegt aus der Sendung. Sendet ein Client gar nichts mehr (z. B. inaktiver Tab), beendet der Server den Lauf nach 5 s (`STALE_TIMEOUT_MS`).
 
 ## Start
@@ -27,6 +29,36 @@ npm run bots        # 5 Bots zu einem bereits laufenden Server hinzufügen
 Eigene Anzahl: `node server.js --bots 10` bzw. `node tools/bots.js 8 --url ws://host:port/ws`.
 
 Die Bots spielen wirklich: gleiche Strecke, Physik und Stalker wie Menschen. Alle 0,1 s spielen sie ein paar zufällige Eingabefolgen ~1 s voraus durch und nehmen die beste (`tools/botbrain.js`). Ihr Können ist über die Bots verteilt – vom tollpatschigen Bot, der oft stirbt und zögert, bis zum Profi, der Kamine hochklettert und mit fast Höchsttempo läuft. Rechenlast: ca. 17 % eines CPU-Kerns für Server + 6 Bots.
+
+## Deployment auf Dokku
+
+Das Repo enthält alles für einen Push-Deploy: `Dockerfile` (Node 24, nur Produktions-Abhängigkeiten, läuft als `node`-User auf Port 5000), `.dockerignore` und `app.json` (genau **eine** Web-Instanz – der Spielzustand liegt im Speicher – plus Healthcheck auf `/api/status`, bevor Dokku umschaltet). WebSockets laufen über Dokkus nginx ohne Zusatzkonfiguration; bei HTTPS verbindet sich der Client automatisch per `wss://`.
+
+Einmalig auf dem Server (App-Name und Domain anpassen):
+
+```bash
+dokku apps:create parallax-runner
+dokku domains:set parallax-runner runner.example.com
+# Hall of Fame + Streckenmarker überleben Deploys nur mit einem Volume
+dokku storage:ensure-directory --chown heroku parallax-runner   # uid 1000 = node-User im Image
+dokku storage:mount parallax-runner /var/lib/dokku/data/storage/parallax-runner:/app/data
+# feste Strecke, damit Marker und Bestenliste nicht bei jedem Neustart neu beginnen (optional)
+dokku config:set parallax-runner SEED=20491982
+# HTTPS (optional, mit dem letsencrypt-Plugin)
+dokku letsencrypt:set parallax-runner email you@example.com
+dokku letsencrypt:enable parallax-runner
+```
+
+Lokal:
+
+```bash
+git remote add dokku dokku@<server>:parallax-runner
+git push dokku master
+```
+
+Jeder weitere `git push dokku master` baut das Image neu und deployt. Laufende Spieler verlieren dabei kurz die Verbindung und verbinden sich automatisch neu; der Server speichert Bestenliste und Marker beim Herunterfahren (SIGTERM).
+
+Umgebungsvariablen: `SEED` (feste Strecke), `DATA_DIR` (Datenverzeichnis, im Image `/app/data`), `MAX_MARKERS` (Standard 250), `STALE_TIMEOUT_MS` (Standard 5000).
 
 ## Steuerung
 

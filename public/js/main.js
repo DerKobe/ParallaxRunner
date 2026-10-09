@@ -70,6 +70,9 @@ const net = new Net({
     S.viewIds = m.ids;
     syncLanes();
   },
+  markers(m) {
+    world.setMarkers(m.a, m.b);
+  },
   board(m) {
     S.board = new Map(m.p);
   },
@@ -290,6 +293,29 @@ function updateTags(lanes, refX) {
   for (const [lane, el] of tags) if (!seen.has(lane)) { el.remove(); tags.delete(lane); }
 }
 
+// course marker labels (DOM, so the text stays crisp); only the ones on screen get an element
+const markerTags = [];
+function updateMarkerTags() {
+  const labels = world.markerRoot?.parent ? world.markerLabels ?? [] : [];
+  if (labels.length) world.markerRoot.updateMatrixWorld();
+  let used = 0;
+  for (const l of labels) {
+    tmpV.set(l.x, l.y, -0.7).applyMatrix4(world.markerRoot.matrixWorld).project(world.camera);
+    if (tmpV.z > 1 || Math.abs(tmpV.x) > 1.05 || Math.abs(tmpV.y) > 1.05) continue;
+    let el = markerTags[used];
+    if (!el) { el = document.createElement('div'); $('labels').appendChild(el); markerTags.push(el); }
+    used++;
+    el.style.display = '';
+    el.style.left = `${(tmpV.x * 0.5 + 0.5) * innerWidth}px`;
+    el.style.top = `${(-tmpV.y * 0.5 + 0.5) * innerHeight}px`;
+    const html = l.kind === 'named'
+      ? `${esc(l.name)} <b>${l.d} m</b>${l.more ? ` <i>+${l.more}</i>` : ''}${l.deaths ? ` <s>☠${l.deaths}</s>` : ''}`
+      : l.text;
+    if (el._html !== html) { el.innerHTML = html; el._html = html; el.className = `mtag ${l.kind}`; }
+  }
+  for (let i = used; i < markerTags.length; i++) markerTags[i].style.display = 'none';
+}
+
 // ------------------------------------------------------------------ remote interpolation
 function sampleRemote(r, now) {
   const s = r.samples;
@@ -417,6 +443,9 @@ function frame(now) {
     const lanes = [...S.remotes.values()].map(r => r.lane).filter(Boolean).concat(S.falling);
     if (S.localLane) lanes.push(S.localLane);
     if (S.attract) lanes.push(S.attract);
+    // course markers sit on the frontmost lane
+    const front = S.localLane ?? [...S.remotes.values()].map(r => r.lane).sort((a, b) => a.index - b.index)[0] ?? S.attract;
+    world.attachMarkers(front);
     const gt = gameTime();
     for (const l of lanes) {
       l.clock = l.local || l.attract ? gt : gt - REMOTE_LAG;
@@ -428,6 +457,7 @@ function frame(now) {
   }
 
   updateTags(tagList, S.mode === 'play' ? S.player.x : null);
+  updateMarkerTags();
   world.update(dt, t, view.x, view.y);
   world.render(t);
 }
@@ -446,7 +476,7 @@ function handleEvents(events) {
       case 'die': {
         sfx.die(); lane.burst(); world.glitch = 1.2;
         S.deaths++;
-        net.send({ t: 'die', d: e.distance });
+        net.send({ t: 'die', d: e.distance, x: +e.x.toFixed(1), y: +e.y.toFixed(1) });
         const caught = e.cause === 'caught';
         if (caught) world.glitch = 1.6;
         // caught again and again without leaving the start → nobody is playing: end the run

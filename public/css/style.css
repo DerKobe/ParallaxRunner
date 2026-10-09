@@ -24,6 +24,16 @@ canvas#game { position: fixed; inset: 0; width: 100vw; height: 100vh; display: b
 }
 .tag3d small { color: var(--ink); opacity: 0.8; margin-left: 6px; text-shadow: none; }
 .tag3d.dead { opacity: 0.5; }
+.mtag {
+  position: absolute; transform: translate(-50%, -100%); white-space: nowrap;
+  font-family: var(--pixel); font-size: 8px; padding: 3px 5px; letter-spacing: 1px;
+  background: rgba(6, 2, 14, 0.62); pointer-events: none;
+}
+.mtag.named { color: var(--cyan); border-bottom: 2px solid var(--cyan); text-shadow: 0 0 6px var(--cyan); }
+.mtag.named b { color: #fff; font-weight: normal; }
+.mtag.named i { color: var(--muted); font-style: normal; }
+.mtag.named s { color: var(--pink); text-decoration: none; font-family: var(--term); font-size: 15px; vertical-align: -2px; }
+.mtag.anon { color: var(--pink); font-family: var(--term); font-size: 16px; padding: 0 4px; text-shadow: 0 0 6px var(--pink); }
 .tag3d.edge { font-size: 10px; padding: 5px 7px; background: rgba(6, 2, 14, 0.85); }
 .tag3d.edge.left { transform: translate(0, -50%); border-left: 3px solid currentColor; }
 .tag3d.edge.right { transform: translate(-100%, -50%); border-left: none; border-right: 3px solid currentColor; }

@@ -10,8 +10,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const THREE_DIR = path.join(__dirname, 'node_modules', 'three', 'build');
-const DATA_DIR = path.join(__dirname, 'data');
+// persistent data (hall of fame, course markers); on Dokku mount a storage volume here
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const HOF_FILE = path.join(DATA_DIR, 'halloffame.json');
+const MARKER_FILE = path.join(DATA_DIR, 'markers.json');
 
 // One shared course for everybody on this server. Override with SEED=1234 for a fixed track.
 const SEED = Number(process.env.SEED) || ((Math.random() * 2 ** 31) | 0);
@@ -37,31 +39,38 @@ const MIME = {
   '.ico': 'image/x-icon',
 };
 
-function serveFile(res, root, rel) {
+// always revalidate, but answer unchanged files with 304 so browsers don't re-download three.js
+function serveFile(req, res, root, rel) {
   const file = path.normalize(path.join(root, rel));
   if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
   fs.stat(file, (err, st) => {
     if (err || !st.isFile()) { res.writeHead(404, { 'content-type': 'text/plain' }).end('not found'); return; }
-    res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' });
+    const lastModified = st.mtime.toUTCString();
+    const headers = { 'cache-control': 'no-cache', 'last-modified': lastModified };
+    const since = req.headers['if-modified-since'];
+    if (since && Math.floor(st.mtimeMs / 1000) <= Math.floor(Date.parse(since) / 1000)) { res.writeHead(304, headers).end(); return; }
+    res.writeHead(200, { ...headers, 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'content-length': st.size });
+    if (req.method === 'HEAD') { res.end(); return; }
     fs.createReadStream(file).pipe(res);
   });
 }
 
 const server = http.createServer((req, res) => {
   const url = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-  if (url.startsWith('/vendor/three/')) return serveFile(res, THREE_DIR, url.slice('/vendor/three/'.length));
+  if (url.startsWith('/vendor/three/')) return serveFile(req, res, THREE_DIR, url.slice('/vendor/three/'.length));
   if (url === '/api/status') {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ seed: SEED, players: [...clients.values()].filter(c => c.mode === 'play').length }));
     return;
   }
-  serveFile(res, PUBLIC_DIR, url === '/' ? 'index.html' : url);
+  serveFile(req, res, PUBLIC_DIR, url === '/' ? 'index.html' : url);
 });
 
 // ---------------------------------------------------------------- hall of fame
 let hallOfFame = [];
 try { hallOfFame = JSON.parse(fs.readFileSync(HOF_FILE, 'utf8')).filter(e => e.seed === SEED); } catch { /* fresh start */ }
 let hofDirty = false;
+const hofJson = () => JSON.stringify(hallOfFame, null, 1);
 function recordScore(name, dist) {
   if (dist < 10) return false;
   const prev = hallOfFame.find(e => e.name === name);
@@ -76,7 +85,59 @@ function recordScore(name, dist) {
 setInterval(() => {
   if (!hofDirty) return;
   hofDirty = false;
-  fs.mkdir(DATA_DIR, { recursive: true }, () => fs.writeFile(HOF_FILE, JSON.stringify(hallOfFame, null, 1), () => {}));
+  fs.mkdir(DATA_DIR, { recursive: true }, () => fs.writeFile(HOF_FILE, hofJson(), () => {}));
+}, 5000);
+
+// ---------------------------------------------------------------- course markers
+// Neon crosses where runners died (nearby deaths are clustered into one marker with a count) and one
+// named marker per player at their best distance. Capped in size: nameless markers go first.
+const MAX_MARKERS = Number(process.env.MAX_MARKERS) || 250;
+const CLUSTER_X = 1.5, CLUSTER_Y = 2.5;
+const NAMED_MIN_DIST = 20;
+let markers = { anon: [], named: [] };
+try {
+  const m = JSON.parse(fs.readFileSync(MARKER_FILE, 'utf8'));
+  if (m.seed === SEED) markers = { anon: m.anon || [], named: m.named || [] };
+} catch { /* fresh start */ }
+let markersDirty = false, markersChanged = false;
+const markersJson = () => JSON.stringify({ seed: SEED, ...markers });
+const r1 = (v) => Math.round(v * 10) / 10;
+
+function pruneMarkers() {
+  while (markers.anon.length + markers.named.length > MAX_MARKERS) {
+    if (markers.anon.length) { // fewest deaths first, oldest on ties
+      let k = 0;
+      markers.anon.forEach((m, i) => { const b = markers.anon[k]; if (m.n < b.n || (m.n === b.n && m.at < b.at)) k = i; });
+      markers.anon.splice(k, 1);
+    } else {
+      let k = 0;
+      markers.named.forEach((m, i) => { if (m.d < markers.named[k].d) k = i; });
+      markers.named.splice(k, 1);
+    }
+  }
+}
+function addDeathMarker(x, y) {
+  const near = markers.anon.find(m => Math.abs(m.x - x) <= CLUSTER_X && Math.abs(m.y - y) <= CLUSTER_Y);
+  if (near) { near.x = r1((near.x * near.n + x) / (near.n + 1)); near.y = r1((near.y * near.n + y) / (near.n + 1)); near.n++; near.at = Date.now(); }
+  else markers.anon.push({ x: r1(x), y: r1(y), n: 1, at: Date.now() });
+  pruneMarkers();
+  markersDirty = markersChanged = true;
+}
+function setBestMarker(name, d) {
+  if (d < NAMED_MIN_DIST) return;
+  const prev = markers.named.find(m => m.name === name);
+  if (prev && prev.d >= d) return;
+  if (prev) { prev.d = d; prev.x = d + 2.5; prev.at = Date.now(); }
+  else markers.named.push({ name, d, x: d + 2.5, at: Date.now() });
+  pruneMarkers();
+  markersDirty = markersChanged = true;
+}
+const markerMsg = () => ({ t: 'markers', a: markers.anon.map(m => [m.x, m.y, m.n]), b: markers.named.map(m => [m.name, m.x, m.d]) });
+setInterval(() => { if (markersChanged) { markersChanged = false; broadcast(markerMsg()); } }, 2000);
+setInterval(() => {
+  if (!markersDirty) return;
+  markersDirty = false;
+  fs.mkdir(DATA_DIR, { recursive: true }, () => fs.writeFile(MARKER_FILE, markersJson(), () => {}));
 }, 5000);
 
 // ---------------------------------------------------------------- realtime
@@ -113,6 +174,7 @@ wss.on('connection', (ws) => {
   clients.set(c.id, c);
   send(ws, { t: 'welcome', id: c.id, seed: SEED, color: c.color, tick: TICK_HZ, ts: Date.now() });
   send(ws, { t: 'roster', players: roster(), hof: hallOfFame.map(({ name, dist }) => ({ name, dist })) });
+  send(ws, markerMsg());
 
   ws.on('message', (raw) => {
     if (--c.msgBudget < 0) return; // simple flood guard, refilled every second
@@ -150,6 +212,8 @@ wss.on('connection', (ws) => {
         c.best = Math.max(c.best, dist);
         c.runStart = Date.now();
         recordScore(c.name, dist);
+        if (Number.isFinite(m.x)) addDeathMarker(num(m.x, 0, dist + 8), num(m.y, -2, 60));
+        setBestMarker(c.name, dist);
         broadcastRoster();
         break;
       }
@@ -215,3 +279,21 @@ server.listen(PORT, () => {
     import('./tools/bots.js').then(m => m.spawnBots(count, { url: `ws://localhost:${PORT}/ws` }));
   }
 });
+
+// Graceful shutdown (Dokku sends SIGTERM on every deploy/restart): persist data, close sockets, exit.
+let shuttingDown = false;
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} received – saving data and shutting down`);
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(HOF_FILE, hofJson());
+    fs.writeFileSync(MARKER_FILE, markersJson());
+  } catch (e) { console.error('could not save data:', e.message); }
+  for (const c of clients.values()) c.ws.close(1012, 'server restart'); // clients reconnect automatically
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 3000).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

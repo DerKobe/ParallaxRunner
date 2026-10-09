@@ -4,6 +4,7 @@ import { H, EMPTY, BUILDING, PLATFORM, HAZARD, SIGN, TOWER, DECO, isSolid, hash2
 import {
   SLOT, slotUV, makeAtlas, makeRunnerSheet, FRAME, SHEET_FRAMES, makeSky, makeSkyline,
   makeSpinnerTexture, makeDroneTexture, makeGlowSprite, pixelTexture, makeHunterTexture, makeEnemyTextures,
+  makeCrossTexture,
 } from './textures.js';
 import { ANIM } from './player.js';
 import { HS } from './hunter.js';
@@ -567,6 +568,82 @@ export class World {
     addEventListener('resize', () => this.resize());
   }
 
+  // ---------------------------------------------------------------- course markers
+  // Neon crosses where runners died (server-clustered, with a count) and named best-distance
+  // markers. They live in the front lane only, so the course isn't littered nine times over.
+  setMarkers(anon, named) {
+    this.markerData = { anon, named };
+    this.rebuildMarkers();
+  }
+
+  // where to plant a cross: on the roof at x, or – for a fall into a pit – at the edge before it
+  markerGround(x, yHint) {
+    const L = this.level;
+    for (let dx = 0; dx <= 8; dx++) {
+      const tx = Math.floor(x) - dx;
+      for (let y = Math.min(H - 1, Math.floor(yHint) + 1); y >= 0; y--) {
+        if (isSolid(L.get(tx, y))) return { x: dx ? tx + 0.6 : x, y: y + 1 };
+      }
+    }
+    return { x, y: 0 };
+  }
+
+  rebuildMarkers() {
+    if (!this.level || !this.markerData) return;
+    if (!this.markerRoot) {
+      this.markerRoot = new THREE.Group();
+      this.crossGeo = new THREE.PlaneGeometry(0.75, 1.125).translate(0, 0.56, 0);
+      this.crossMat = { anon: new THREE.MeshBasicMaterial({ map: makeCrossTexture('#ff2a6d'), alphaTest: 0.5 }), named: new THREE.MeshBasicMaterial({ map: makeCrossTexture('#05d9e8'), alphaTest: 0.5 }) };
+      this.glowCyanMat = new THREE.MeshBasicMaterial({ map: makeGlowSprite('#05d9e8'), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+    }
+    for (const ch of [...this.markerRoot.children]) this.markerRoot.remove(ch);
+    // labels are drawn as crisp DOM overlays (text would not survive the low-res pixel render)
+    this.markerLabels = [];
+    const R = 1.5;
+    // named best markers close to each other → one label "NAME 1204 m +2"
+    const named = [...this.markerData.named].sort((a, b) => a[1] - b[1]);
+    const groups = [];
+    for (const [name, x, d] of named) {
+      const g = groups[groups.length - 1];
+      if (g && x - g.x0 <= R) { g.names.push([name, d]); if (d > g.best[1]) g.best = [name, d]; g.x = x; }
+      else groups.push({ x0: x, x, names: [[name, d]], best: [name, d], deaths: 0 });
+    }
+    // death clusters next to a named marker fold into its label ("☠12"), the rest get their own cross
+    const anon = [];
+    for (const [x, y, n] of this.markerData.anon) {
+      const g = groups.find(g => x >= g.x0 - R && x <= g.x + R);
+      if (g) g.deaths += n; else anon.push([x, y, n]);
+    }
+    for (const [x, y, n] of anon) {
+      const p = this.markerGround(x, y);
+      const m = new THREE.Mesh(this.crossGeo, this.crossMat.anon);
+      m.position.set(p.x, p.y, -0.7);
+      m.scale.setScalar(0.8 + Math.min(0.6, Math.log2(n) * 0.12));
+      this.markerRoot.add(m);
+      if (n > 1) this.markerLabels.push({ x: p.x, y: p.y + 1.15, kind: 'anon', text: `×${n}` });
+    }
+    for (const g of groups) {
+      const p = this.markerGround(g.best[1] + 2.5, H);
+      const m = new THREE.Mesh(this.crossGeo, this.crossMat.named);
+      m.position.set(p.x, p.y, -0.7);
+      m.scale.setScalar(1.25);
+      const glow = new THREE.Mesh(this.glowGeo, this.glowCyanMat);
+      glow.position.set(0, 0.6, 0.02); glow.scale.setScalar(0.85);
+      m.add(glow);
+      this.markerRoot.add(m);
+      this.markerLabels.push({ x: p.x, y: p.y + 1.55, kind: 'named', name: g.best[0], d: g.best[1], more: g.names.length - 1, deaths: g.deaths });
+    }
+  }
+
+  // markers ride on the front lane (local lane in a run, first lane in the menu)
+  attachMarkers(lane) {
+    if (!this.markerRoot) return;
+    const parent = lane?.group ?? null;
+    if (this.markerRoot.parent === parent) return;
+    this.markerRoot.parent?.remove(this.markerRoot);
+    if (parent) parent.add(this.markerRoot);
+  }
+
   makeEnemyMesh(type) {
     const g = new THREE.Group();
     const sprite = new THREE.Mesh(this.enemyGeo[type], this.enemyMats[type][0]);
@@ -593,6 +670,7 @@ export class World {
     this.chunks?.dispose();
     this.level = level;
     this.chunks = new ChunkCache(level);
+    this.rebuildMarkers();
   }
 
   setupLights() {
