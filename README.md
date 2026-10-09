@@ -84,3 +84,7 @@ Gamepad wird unterstützt.
 - `public/js/world.js` – three.js-Darstellung: geteilte Chunk-Geometrie, eine `Lane` pro Spieler (Ein-/Wegfall-Animation), Skyline-Parallax, Regen, Spinner, Pixel-Postprocessing (Low-Res, Dithering, Bloom, Scanlines, Glitch).
 - `public/js/textures.js` – sämtliche Pixel-Art wird zur Laufzeit generiert (Tiles, Runner-Spritesheet, Skyline).
 - `tools/bots.js`, `tools/botbrain.js` – spielende Test-Bots (siehe oben).
+
+## Lizenz
+
+[MIT](LICENSE). Verwendete Bibliotheken: [three.js](https://github.com/mrdoob/three.js) und [ws](https://github.com/websockets/ws) (beide MIT); die Schriften Press Start 2P und VT323 werden von Google Fonts geladen (SIL Open Font License).

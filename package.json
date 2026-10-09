@@ -10,7 +10,7 @@
     "bots": "node tools/bots.js 5",
     "demo": "node server.js --bots 6"
   },
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "three": "^0.186.1",
     "ws": "^8.22.0"
