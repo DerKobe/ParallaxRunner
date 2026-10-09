@@ -37,12 +37,25 @@ let name = '';
 try { name = localStorage.getItem('pr-name') || ''; } catch { /* ignore */ }
 $('name').value = name;
 
+// ------------------------------------------------------------------ shared clock
+// Server time drives the patrolling enemies, so all clients show them in sync without extra traffic.
+// Message timestamps arrive late by the latency, so we keep the largest offset seen (slowly decaying).
+const clock = { offset: null };
+function syncClock(ts) {
+  if (!ts) return;
+  const est = ts - Date.now();
+  clock.offset = clock.offset === null ? est : Math.max(est, clock.offset - 2);
+}
+const gameTime = () => (Date.now() + (clock.offset ?? 0)) / 1000;
+const REMOTE_LAG = (INTERP_DELAY + 20) / 1000; // remote runners are shown this much in the past
+
 // ------------------------------------------------------------------ networking
 const net = new Net({
   open() { setConn('ONLINE', true); },
   close() { setConn('CONNECTION LOST – RECONNECTING…', false); },
   welcome(m) {
     S.myId = m.id; S.color = m.color;
+    syncClock(m.ts);
     if (m.seed !== S.seed) setupLevel(m.seed);
     $('start-btn').disabled = false;
     if (S.mode === 'play') net.send({ t: 'start', name }); // resume after reconnect
@@ -66,6 +79,7 @@ const net = new Net({
     showNotice(m.reason === 'stale' ? 'SIGNAL LOST – your game stopped sending (inactive tab?). Run ended.' : 'Your run was ended.');
   },
   snap(m) {
+    syncClock(m.ts);
     const now = performance.now();
     for (const [id, x, y, a, f, hx, hy, hs] of m.p) {
       if (id === S.myId) continue;
@@ -230,6 +244,7 @@ const TICKER = [
   'FALL = RESET. NO SECOND CHANCES. ONLY RE-RUNS.',
   'TONIGHT\'S SPONSOR: SYNTH NOODLES – NOW 40% REAL',
   'LASER FENCES ARE HOT. DO NOT TOUCH THE RED.',
+  'SECURITY UPDATE: CRAWLERS, SENTRY MINES AND HOVER COPS NOW PATROL THE ROOFS',
 ];
 $('ticker-text').textContent = TICKER.join('   ◆   ');
 
@@ -352,6 +367,7 @@ function frame(now) {
     // local runner
     if (S.mode === 'play' && S.localLane) {
       const p = S.player, h = S.hunter;
+      p.clock = gameTime() - dt;
       p.update(dt, input);
       if (!p.dead && h.update(dt)) p.die('caught');
       handleEvents(p.events.splice(0));
@@ -401,7 +417,11 @@ function frame(now) {
     const lanes = [...S.remotes.values()].map(r => r.lane).filter(Boolean).concat(S.falling);
     if (S.localLane) lanes.push(S.localLane);
     if (S.attract) lanes.push(S.attract);
-    for (const l of lanes) l.update(dt, t, view, world.halfWidthAt(l.z ?? -l.index * LANE_GAP));
+    const gt = gameTime();
+    for (const l of lanes) {
+      l.clock = l.local || l.attract ? gt : gt - REMOTE_LAG;
+      l.update(dt, t, view, world.halfWidthAt(l.z ?? -l.index * LANE_GAP));
+    }
     for (let i = S.falling.length - 1; i >= 0; i--) {
       if (S.falling[i].gone) { S.falling[i].dispose(); S.falling.splice(i, 1); }
     }

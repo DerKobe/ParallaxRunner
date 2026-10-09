@@ -439,6 +439,51 @@ export function makeHunterTexture() {
   return pixelTexture(c);
 }
 
+// Patrolling enemies, two animation frames each (facing right)
+export function makeEnemyTextures() {
+  const sheet = (w, h, draw) => [0, 1].map((f) => {
+    const [c, ctx] = canvas(w, h);
+    const p = (x, y, ww, hh, col) => { ctx.fillStyle = col; ctx.fillRect(x, y, ww, hh); };
+    draw(p, f);
+    // dark pixel outline so they read against the roofs (same look as the runners)
+    const img = ctx.getImageData(0, 0, w, h), d = img.data, out = new Uint8ClampedArray(d);
+    const a = (x, y) => x >= 0 && y >= 0 && x < w && y < h && d[(y * w + x) * 4 + 3] > 0;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (a(x, y) || !(a(x + 1, y) || a(x - 1, y) || a(x, y + 1) || a(x, y - 1))) continue;
+      const i = (y * w + x) * 4; out[i] = 6; out[i + 1] = 4; out[i + 2] = 12; out[i + 3] = 255;
+    }
+    ctx.putImageData(new ImageData(out, w, h), 0, 0);
+    return pixelTexture(c);
+  });
+  // CRAWLER: armoured spider-bot, 24x16
+  const crawler = sheet(24, 16, (p, f) => {
+    const legs = f ? [[3, 0], [9, 1], [15, 0], [20, 1]] : [[4, 1], [10, 0], [14, 1], [19, 0]];
+    for (const [x, o] of legs) { p(x, 9, 1, 3, '#8a90b5'); p(x - 1 + o * 2, 12, 1, 3, '#5d6280'); p(x - 2 + o * 3, 14, 2, 1, '#2b2f45'); }
+    p(5, 4, 14, 6, '#454b6e'); p(7, 3, 10, 1, '#6a7199'); p(6, 4, 12, 1, '#7c84b0');
+    p(5, 9, 14, 1, '#14151f');
+    for (let x = 7; x < 17; x += 3) p(x, 7, 2, 1, '#f9c80e');
+    p(16, 5, 3, 2, '#0a0a10'); p(17, 5, 2, 2, f ? '#ff2030' : '#ff6070'); p(18, 5, 1, 1, '#ffd0d0');
+    p(9, 1, 1, 2, '#5d6280'); p(9, 0, 1, 1, f ? '#ff2030' : '#5a1018');
+  });
+  // SENTRY: spiked floating mine with a pulsing core, 16x16
+  const sentry = sheet(16, 16, (p, f) => {
+    const spikes = f ? [[7, 0, 2, 3], [7, 13, 2, 3], [0, 7, 3, 2], [13, 7, 3, 2]] : [[2, 2, 2, 2], [12, 2, 2, 2], [2, 12, 2, 2], [12, 12, 2, 2]];
+    for (const [x, y, w, h] of spikes) p(x, y, w, h, '#8a8fa8');
+    p(4, 3, 8, 10, '#22263a'); p(3, 4, 10, 8, '#22263a'); p(5, 3, 6, 1, '#3c4060'); p(3, 5, 1, 6, '#3c4060');
+    p(5, 5, 6, 6, f ? '#ff2a6d' : '#7a0f35'); p(6, 6, 4, 4, f ? '#ffd0e0' : '#ff2a6d'); p(7, 7, 2, 2, '#ffffff');
+  });
+  // HOVER: police glider with light bar, 32x12
+  const hover = sheet(32, 12, (p, f) => {
+    p(3, 4, 26, 5, '#1c1e2b'); p(6, 3, 18, 1, '#2d3044'); p(3, 8, 26, 1, '#14151f');
+    p(9, 1, 10, 3, '#2d3044'); p(11, 2, 6, 2, '#79c8ff'); p(12, 2, 2, 1, '#e8f6ff');
+    p(4, 6, 24, 1, '#e8f6ff');                       // POLICE stripe
+    p(12, 0, 3, 1, f ? '#ff2020' : '#401010'); p(15, 0, 3, 1, f ? '#102040' : '#2060ff');
+    p(28, 5, 2, 2, '#fff4c0'); p(1, 5, 2, 2, '#ff2020');
+    p(6, 9, 4, 2, f ? '#ffb347' : '#ff8c00'); p(22, 9, 4, 2, f ? '#ff8c00' : '#ffb347');
+  });
+  return { crawler, sentry, hover };
+}
+
 export function makeDroneTexture() {
   // TV camera drone, 12x8
   const [c, ctx] = canvas(12, 8);

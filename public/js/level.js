@@ -1,5 +1,6 @@
 // Deterministic procedural course. Every client builds the identical track from the server seed,
 // so all lanes show the same rooftops – only at different positions.
+import { ENEMY } from './enemies.js';
 
 export const H = 40;          // tile rows
 export const EMPTY = 0, BUILDING = 1, PLATFORM = 2, HAZARD = 3, SIGN = 4, TOWER = 5;
@@ -34,6 +35,7 @@ export class Level {
     this.surface = [];   // walkable ground height per column (for decoration placement / spawn)
     this.block = [];     // building block id per column (neon colour grouping)
     this.blockId = 0;
+    this.enemies = [];   // patrolling enemies, sorted by x0
     this.g = 4;
     this.genStart();
   }
@@ -46,6 +48,18 @@ export class Level {
     return this.cols[x][y];
   }
   ensure(x) { while (this.cols.length <= x) this.genSegment(); }
+
+  // calls fn(enemy) for every enemy whose patrol range may reach into [x0, x1]
+  forEnemiesNear(x0, x1, fn) {
+    this.ensure(Math.ceil(x1) + 2);
+    const list = this.enemies, from = x0 - 8; // patrol ranges are shorter than 8 tiles
+    let lo = 0, hi = list.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (list[mid].x0 < from) lo = mid + 1; else hi = mid; }
+    for (let i = lo; i < list.length && list[i].x0 <= x1; i++) {
+      const e = list[i];
+      if (Math.max(e.x0, e.x1) + 1 >= x0) fn(e);
+    }
+  }
 
   // ---- helpers
   r(a, b) { return a + Math.floor(this.rng() * (b - a + 1)); }
@@ -90,6 +104,9 @@ export class Level {
       ['chimney', 0.5 + d * 0.8],
       ['drop', 0.6],
       ['combo', d * 1.5],
+      ['crawler', 0.9 + d * 0.4],
+      ['sentry', 0.6 + d * 0.6],
+      ['hover', 0.6 + d * 0.6],
     ];
     let total = 0; for (const [, w] of table) total += w;
     let roll = this.rng() * total, kind = 'flat';
@@ -201,6 +218,45 @@ export class Level {
     this.g = this.clampG(base + this.r(-1, 2));
     this.newBlock();
     this.flat(this.r(4, 6));
+  }
+
+  // --- patrolling enemies (always on their own flat stretch, without roof clutter)
+  addEnemy(e) { this.enemies.push({ phase: this.rng(), ...e }); }
+
+  seg_crawler(d) {
+    // spider-bot walking back and forth on the roof: jump over it
+    this.flat(2);
+    const len = this.r(4, 6);
+    const x0 = this.cols.length + 0.6;
+    this.flat(len, { noDeco: true });
+    const x1 = this.cols.length - 0.6;
+    this.addEnemy({ type: ENEMY.CRAWLER, x0, x1, y0: this.g, y1: this.g, period: 2 * (x1 - x0) / (2.2 + 1.8 * d) });
+    this.flat(2);
+  }
+
+  seg_sentry(d) {
+    // floating mines going up and down: pass underneath while they are up
+    this.flat(2);
+    const n = d > 0.35 && this.chance(0.5) ? 2 : 1;
+    const period = 2.8 - d * 0.9, phase = this.rng();
+    for (let i = 0; i < n; i++) {
+      const x = this.cols.length + 0.5;
+      this.flat(1, { noDeco: true });
+      this.enemies.push({ type: ENEMY.SENTRY, x0: x, x1: x, y0: this.g + 0.1, y1: this.g + 4.4, period, phase: phase + i * 0.35 });
+      this.flat(this.r(2, 3), { noDeco: true });
+    }
+    this.flat(1);
+  }
+
+  seg_hover(d) {
+    // police glider patrolling just above head height: run underneath, don't jump
+    this.flat(2);
+    const len = this.r(5, 7);
+    const x0 = this.cols.length + 1;
+    this.flat(len, { noDeco: true });
+    const x1 = this.cols.length - 1;
+    this.addEnemy({ type: ENEMY.HOVER, x0, x1, y0: this.g + 1.8, y1: this.g + 1.8, period: 2 * (x1 - x0) / (3 + 2 * d) });
+    this.flat(2);
   }
 
   seg_combo(d) {

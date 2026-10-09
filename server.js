@@ -111,7 +111,7 @@ wss.on('connection', (ws) => {
     hx: 0, hy: 0, hs: HUNTER.NONE,
   };
   clients.set(c.id, c);
-  send(ws, { t: 'welcome', id: c.id, seed: SEED, color: c.color, tick: TICK_HZ });
+  send(ws, { t: 'welcome', id: c.id, seed: SEED, color: c.color, tick: TICK_HZ, ts: Date.now() });
   send(ws, { t: 'roster', players: roster(), hof: hallOfFame.map(({ name, dist }) => ({ name, dist })) });
 
   ws.on('message', (raw) => {

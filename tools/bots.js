@@ -23,10 +23,13 @@ function spawnBot(i, count, { url }) {
   const connect = () => {
     const ws = new WebSocket(url);
     bot.ws = ws;
-    let level, p, h, brain, sendT = 0, last = 0, acc = 0;
+    let level, p, h, brain, sendT = 0, last = 0, acc = 0, offset = null;
+    const sync = (ts) => { if (ts) { const est = ts - Date.now(); offset = offset === null ? est : Math.max(est, offset - 2); } };
+    const gameTime = () => (Date.now() + (offset ?? 0)) / 1000; // shared clock driving the enemies
 
     ws.on('message', (raw) => {
       const m = JSON.parse(raw);
+      if (m.t === 'welcome' || m.t === 'snap') sync(m.ts);
       if (m.t === 'welcome') {
         clearInterval(bot.timer);
         level = new Level(m.seed); p = new Player(level); h = new Hunter(p);
@@ -42,8 +45,10 @@ function spawnBot(i, count, { url }) {
     const tick = () => {
       const now = performance.now();
       acc += Math.min(0.25, (now - last) / 1000); last = now;
-      while (acc >= 1 / 60) {
-        acc -= 1 / 60;
+      const frames = Math.floor(acc * 60);
+      acc -= frames / 60;
+      p.clock = gameTime() - frames / 60; // after stepping, the player's clock is "now"
+      for (let f = 0; f < frames; f++) {
         p.update(1 / 60, brain.next());
         if (!p.dead && h.update(1 / 60)) p.die('caught');
         for (const e of p.events.splice(0)) {

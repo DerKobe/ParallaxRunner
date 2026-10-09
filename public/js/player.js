@@ -1,6 +1,7 @@
 // Local runner: classic tile-based platformer physics (run, variable jump, double jump,
 // wall slide / wall jump, slide with crawl under low ceilings).
 import { isSolid, HAZARD, HAZARD_HEIGHT } from './level.js';
+import { enemyHits } from './enemies.js';
 
 export const ANIM = { IDLE: 0, RUN: 1, JUMP: 2, FALL: 3, DJUMP: 4, WALL: 5, SLIDE: 6, DEAD: 7 };
 
@@ -37,6 +38,7 @@ export class Player {
     this.spin = 0; this.runPhase = 0;
     this.dead = false; this.deadTimer = 0;
     this.maxX = this.x; this.runTime = 0;
+    this.clock ??= 0; // shared game clock (s) that drives the enemies – not reset on respawn
     this.acc = 0;
   }
 
@@ -65,6 +67,7 @@ export class Player {
   }
 
   step(dt, input) {
+    this.clock += dt;
     let dir = (input.held('right') ? 1 : 0) - (input.held('left') ? 1 : 0);
     const down = input.held('down');
     if (this.lock > 0) { this.lock -= dt; dir = 0; }
@@ -155,6 +158,7 @@ export class Player {
     // --- death
     if (this.y < -4) this.die('fall');
     else if (this.touchesHazard()) this.die('hazard');
+    else if (this.touchesEnemy()) this.die('enemy');
   }
 
   moveX(dx) {
@@ -193,6 +197,14 @@ export class Player {
       for (let ty = Math.floor(y0); ty <= Math.floor(y1); ty++)
         if (this.level.get(tx, ty) === HAZARD && y0 < ty + HAZARD_HEIGHT && y1 > ty) return true;
     return false;
+  }
+
+  touchesEnemy() {
+    const x0 = this.x - P.W / 2 + 0.08, x1 = this.x + P.W / 2 - 0.08;
+    const y0 = this.y + 0.05, y1 = this.y + this.h - 0.08;
+    let hit = false;
+    this.level.forEnemiesNear(x0 - 1, x1 + 1, (e) => { if (!hit && enemyHits(e, this.clock, x0, x1, y0, y1)) hit = true; });
+    return hit;
   }
 
   die(cause = 'hazard') {

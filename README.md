@@ -5,6 +5,8 @@ Alle anderen Spieler laufen live in eigenen Bahnen **hinter** dir. Die Bahnen li
 
 **Sichtfenster:** Jeder Spieler bekommt vom Server die 4 Spieler vor und die 4 nach ihm (in Beitrittsreihenfolge) – am Anfang/Ende der Liste entsprechend mehr von der anderen Seite. So hat jeder einen „virtuellen Raum“ mit fließenden Grenzen, und der Traffic wächst nur linear mit der Spielerzahl. Verlässt ein Spieler das Spiel (Disconnect, Menü, Timeout), fällt seine Bahn weg; rutscht er nur aus deinem Fenster, sinkt sie ruhig ab.
 
+**Patrouillen:** Drei Gegnertypen bewachen kurze Abschnitte, Berührung ist tödlich: der **Crawler** (Spinnen-Drohne, läuft am Boden hin und her → drüberspringen), die **Sentry** (Schwebemine, fährt hoch und runter → durch, wenn sie oben ist), der **Hover-Cop** (Polizei-Gleiter knapp über Kopfhöhe → drunter durchlaufen, nicht springen). Ihre Bewegung hängt nur von der Server-Uhr ab, deshalb sehen alle Clients sie synchron ohne zusätzlichen Netzwerkverkehr. Mit der Distanz werden sie schneller und häufiger.
+
 **Stalker:** Jeder Runner wird von einer Jäger-Drohne verfolgt, die exakt seine eigene Route mit Zeitversatz abfliegt (4,5 s am Start, schrumpft mit der Distanz bis 2,5 s). Wer zu lange stehen bleibt oder umkehrt, wird eingeholt und stirbt. Wer dreimal am Start erwischt wird, ohne sich zu bewegen, fliegt aus der Sendung. Sendet ein Client gar nichts mehr (z. B. inaktiver Tab), beendet der Server den Lauf nach 5 s (`STALE_TIMEOUT_MS`).
 
 ## Start
@@ -42,6 +44,7 @@ Gamepad wird unterstützt.
 
 - `server.js` – HTTP + WebSocket. Vergibt Seed, Farbe und Bahn-Reihenfolge, broadcastet 20×/s alle Runner-Zustände, führt die Hall of Fame (`data/halloffame.json`).
 - `public/js/level.js` – deterministischer, prozeduraler Streckengenerator (Lücken, Treppen, Plattformen, Laserzäune, Billboards zum Drunterrutschen, Wall-Jump-Kamine). Schwierigkeit steigt mit der Distanz.
+- `public/js/enemies.js` – Bewegung und Hitboxen der Patrouillen-Gegner (Funktion der gemeinsamen Uhr).
 - `public/js/hunter.js` – der Stalker: fliegt die aufgezeichnete Route mit Zeitversatz nach.
 - `public/js/player.js` – Tile-Physik: Coyote-Time, Jump-Buffer, variable Sprunghöhe, Double-Jump, Wall-Slide/-Jump, Slide mit Kriechen unter niedrigen Decken.
 - `public/js/world.js` – three.js-Darstellung: geteilte Chunk-Geometrie, eine `Lane` pro Spieler (Ein-/Wegfall-Animation), Skyline-Parallax, Regen, Spinner, Pixel-Postprocessing (Low-Res, Dithering, Bloom, Scanlines, Glitch).

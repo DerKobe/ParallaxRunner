@@ -3,10 +3,11 @@ import * as THREE from 'three';
 import { H, EMPTY, BUILDING, PLATFORM, HAZARD, SIGN, TOWER, DECO, isSolid, hash2 } from './level.js';
 import {
   SLOT, slotUV, makeAtlas, makeRunnerSheet, FRAME, SHEET_FRAMES, makeSky, makeSkyline,
-  makeSpinnerTexture, makeDroneTexture, makeGlowSprite, pixelTexture, makeHunterTexture,
+  makeSpinnerTexture, makeDroneTexture, makeGlowSprite, pixelTexture, makeHunterTexture, makeEnemyTextures,
 } from './textures.js';
 import { ANIM } from './player.js';
 import { HS } from './hunter.js';
+import { ENEMY, ENEMY_SIZE, enemyPos } from './enemies.js';
 
 export const CHUNK = 16;
 const DEPTH = 14;          // how far buildings extend below y=0
@@ -275,6 +276,10 @@ export class Lane {
     this.group.add(this.hunter, this.beam);
     this.hx = 0; this.hy = 0; this.hs = HS.NONE;
 
+    // patrolling enemies on this lane's course, positioned from the shared clock
+    this.enemies = new Map(); // enemy → mesh group
+    this.clock = 0;
+
     this.particles = new Particles(this.group);
   }
 
@@ -378,6 +383,7 @@ export class Lane {
     if (this.light) { this.light.position.x = this.rx; this.light.position.y = this.ry + 1.4; }
 
     this.updateHunter(dt, t);
+    this.updateEnemies(view.x, viewHalfWidth);
     this.particles.update(dt);
     this.updateChunks(view.x, viewHalfWidth);
   }
@@ -401,6 +407,27 @@ export class Lane {
       this.beam.rotation.z = Math.atan2(dy, dx);
       this.beam.scale.set(d, 1, 1);
     }
+  }
+
+  updateEnemies(cx, hw) {
+    const w = this.world, seen = new Set(), pos = { x: 0, y: 0, dir: 1, ph: 0 };
+    const frame = Math.floor(this.clock * 6) & 1;
+    w.level.forEnemiesNear(cx - hw, cx + hw, (e) => {
+      seen.add(e);
+      let g = this.enemies.get(e);
+      if (!g) { g = w.makeEnemyMesh(e.type); this.group.add(g); this.enemies.set(e, g); }
+      enemyPos(e, this.clock, pos);
+      g.position.set(pos.x, pos.y, 0.2);
+      g.userData.sprite.material = w.enemyMats[e.type][frame];
+      if (e.type !== ENEMY.SENTRY) g.userData.sprite.scale.x = pos.dir;
+      if (e.type === ENEMY.SENTRY) g.userData.glow.scale.setScalar(0.75 + Math.sin(this.clock * 9) * 0.15);
+      if (e.type === ENEMY.HOVER) { // light cone down to the roof: the danger zone above your head
+        const ground = w.level.surface[Math.floor(pos.x)] || 0;
+        g.userData.cone.scale.y = Math.max(0.1, pos.y - ground);
+        g.userData.glow.material = frame ? w.glowRedMat : w.glowBlueMat;
+      }
+    });
+    for (const [e, g] of this.enemies) if (!seen.has(e)) { this.group.remove(g); this.enemies.delete(e); }
   }
 
   updateChunks(cx, hw) {
@@ -516,6 +543,19 @@ export class World {
     this.hunterMat = new THREE.MeshBasicMaterial({ map: makeHunterTexture(), alphaTest: 0.5, side: THREE.DoubleSide });
     this.beamGeo = new THREE.ConeGeometry(0.45, 1, 14, 1, true).translate(0, -0.5, 0).rotateZ(Math.PI / 2);
     this.beamMat = new THREE.MeshBasicMaterial({ color: '#ff3040', transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    // patrolling enemies: shared sprite materials (2 animation frames per type)
+    const et = makeEnemyTextures();
+    const mats = (texs) => texs.map((map) => new THREE.MeshBasicMaterial({ map, alphaTest: 0.5, side: THREE.DoubleSide }));
+    this.enemyMats = { [ENEMY.CRAWLER]: mats(et.crawler), [ENEMY.SENTRY]: mats(et.sentry), [ENEMY.HOVER]: mats(et.hover) };
+    this.enemyGeo = {
+      [ENEMY.CRAWLER]: new THREE.PlaneGeometry(1.5, 1).translate(0, 0.5, 0),
+      [ENEMY.SENTRY]: new THREE.PlaneGeometry(1, 1).translate(0, ENEMY_SIZE[ENEMY.SENTRY].h / 2, 0),
+      [ENEMY.HOVER]: new THREE.PlaneGeometry(2, 0.75).translate(0, 0.27, 0),
+    };
+    this.glowBlueMat = new THREE.MeshBasicMaterial({ map: makeGlowSprite('#2060ff'), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+    this.glowPinkMat = new THREE.MeshBasicMaterial({ map: makeGlowSprite('#ff2a6d'), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+    this.hoverConeGeo = new THREE.ConeGeometry(0.8, 1, 12, 1, true).translate(0, -0.5, 0);
+    this.hoverConeMat = new THREE.MeshBasicMaterial({ color: '#9fd8ff', transparent: true, opacity: 0.08, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
 
     this.setupLights();
     this.setupBackground();
@@ -525,6 +565,28 @@ export class World {
     this.menuMix = 1;
     this.resize();
     addEventListener('resize', () => this.resize());
+  }
+
+  makeEnemyMesh(type) {
+    const g = new THREE.Group();
+    const sprite = new THREE.Mesh(this.enemyGeo[type], this.enemyMats[type][0]);
+    g.add(sprite);
+    g.userData.sprite = sprite;
+    if (type === ENEMY.CRAWLER) {
+      const eye = new THREE.Mesh(this.glowGeo, this.glowRedMat);
+      eye.scale.setScalar(0.5); eye.position.set(0.3, 0.4, 0.05);
+      sprite.add(eye);
+    } else if (type === ENEMY.SENTRY) {
+      const glow = new THREE.Mesh(this.glowGeo, this.glowPinkMat);
+      glow.position.set(0, ENEMY_SIZE[type].h / 2, 0.05);
+      g.add(glow); g.userData.glow = glow;
+    } else {
+      const glow = new THREE.Mesh(this.glowGeo, this.glowRedMat);
+      glow.scale.setScalar(0.8); glow.position.set(0, 0.62, 0.05);
+      const cone = new THREE.Mesh(this.hoverConeGeo, this.hoverConeMat);
+      g.add(glow, cone); g.userData.glow = glow; g.userData.cone = cone;
+    }
+    return g;
   }
 
   setLevel(level) {
